@@ -47,10 +47,35 @@ export default function Home() {
     ? store.routine.find((d) => d.id === selectedDayId)
     : null;
 
-  if (authLoading || !user || !profile) {
+  if (authLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (!profile) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-background px-6 text-center">
+        <p className="text-sm text-muted-foreground">
+          No pudimos cargar tu perfil. Revisa la conexion o la configuracion de Supabase.
+        </p>
+        <button
+          type="button"
+          onClick={() => signOut()}
+          className="rounded-xl bg-primary px-6 py-3 text-sm font-bold text-primary-foreground"
+        >
+          Cerrar sesion
+        </button>
       </div>
     );
   }

@@ -76,9 +76,18 @@ export function useWorkoutStore() {
       return;
     }
     setLoading(true);
-    Promise.all([loadRoutine(), loadTodayLogs()]).finally(() =>
-      setLoading(false)
-    );
+    let cancelled = false;
+    const safety = setTimeout(() => {
+      if (!cancelled) setLoading(false);
+    }, 15000);
+    Promise.all([loadRoutine(), loadTodayLogs()]).finally(() => {
+      clearTimeout(safety);
+      if (!cancelled) setLoading(false);
+    });
+    return () => {
+      cancelled = true;
+      clearTimeout(safety);
+    };
   }, [user, loadRoutine, loadTodayLogs]);
 
   // Save full routine

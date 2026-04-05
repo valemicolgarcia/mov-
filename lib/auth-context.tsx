@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { createClient } from "@/lib/supabase/client";
-import type { User } from "@supabase/supabase-js";
+import type { Session, User } from "@supabase/supabase-js";
 
 export interface UserProfile {
   id: string;
@@ -41,70 +41,115 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const supabase = createClient();
 
+  const buildFallbackProfile = useCallback(
+    (userId: string, u: User | null): UserProfile => ({
+      id: userId,
+      display_name:
+        (u?.user_metadata?.display_name as string) ??
+        u?.email?.split("@")[0] ??
+        "Usuario",
+      role: (u?.user_metadata?.role as "professor" | "student") ?? "student",
+    }),
+    []
+  );
+
   const loadProfile = useCallback(
-    async (userId: string) => {
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("id, display_name, role, professor_id")
-        .eq("id", userId)
-        .single();
+    async (userId: string, sessionUser?: User | null) => {
+      try {
+        const { data, error } = await supabase
+          .from("profiles")
+          .select("id, display_name, role, professor_id")
+          .eq("id", userId)
+          .maybeSingle();
 
-      if (data) {
-        setProfile(data as UserProfile);
-        return;
-      }
+        if (data) {
+          setProfile(data as UserProfile);
+          return;
+        }
 
-      const {
-        data: { user: u },
-      } = await supabase.auth.getUser();
-      if (u?.id === userId) {
-        setProfile({
-          id: userId,
-          display_name:
-            (u.user_metadata?.display_name as string) ??
-            u.email?.split("@")[0] ??
-            "Usuario",
-          role:
-            (u.user_metadata?.role as "professor" | "student") ?? "student",
-        });
-        return;
-      }
+        if (error) {
+          console.error("[auth] profiles load:", error.message);
+        }
 
-      if (error) {
-        console.error("[auth] profiles load:", error.message);
+        const u =
+          sessionUser ??
+          (await supabase.auth.getUser()).data.user;
+        if (u?.id === userId) {
+          setProfile(buildFallbackProfile(userId, u));
+        }
+      } catch (e) {
+        console.error("[auth] loadProfile:", e);
+        try {
+          const { data: { user: u } } = await supabase.auth.getUser();
+          if (u?.id === userId) {
+            setProfile(buildFallbackProfile(userId, u));
+          }
+        } catch {
+          /* ignore */
+        }
       }
     },
-    [supabase]
+    [supabase, buildFallbackProfile]
   );
 
   const refreshProfile = useCallback(async () => {
     const {
       data: { user: u },
     } = await supabase.auth.getUser();
-    if (u) await loadProfile(u.id);
+    if (u) await loadProfile(u.id, u);
   }, [supabase, loadProfile]);
 
   useEffect(() => {
-    supabase.auth.getUser().then(async ({ data: { user } }) => {
-      setUser(user);
-      if (user) await loadProfile(user.id);
-      setLoading(false);
-    });
+    let cancelled = false;
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    const applySession = async (session: Session | null) => {
       const u = session?.user ?? null;
       setUser(u);
       if (u) {
-        await loadProfile(u.id);
+        try {
+          await loadProfile(u.id, u);
+        } catch (e) {
+          console.error("[auth] loadProfile:", e);
+        }
       } else {
         setProfile(null);
       }
-      setLoading(false);
+      if (!cancelled) setLoading(false);
+    };
+
+    supabase.auth
+      .getSession()
+      .then(({ data: { session }, error }) => {
+        if (cancelled) return;
+        if (error) {
+          console.error("[auth] getSession:", error.message);
+          setUser(null);
+          setProfile(null);
+          setLoading(false);
+          return;
+        }
+        return applySession(session);
+      })
+      .catch((e) => {
+        console.error("[auth] getSession failed:", e);
+        if (!cancelled) {
+          setUser(null);
+          setProfile(null);
+          setLoading(false);
+        }
+      });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (cancelled) return;
+      void applySession(session);
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+    };
   }, [supabase, loadProfile]);
 
   const signOut = useCallback(async () => {
