@@ -43,25 +43,22 @@ export function UserProfileScreen({ onBack }: UserProfileScreenProps) {
       setProfessorName(null);
       return;
     }
+    let cancelled = false;
     supabase
       .from("profiles")
       .select("display_name")
       .eq("id", profile.professor_id)
       .single()
-      .then(({ data }) => setProfessorName(data?.display_name ?? null));
+      .then(({ data }) => {
+        if (!cancelled) setProfessorName(data?.display_name ?? "Tu profesor");
+      });
+    return () => { cancelled = true; };
   }, [profile?.professor_id, user, supabase]);
 
   useEffect(() => {
     if (!user || profile?.role !== "professor") return;
-    supabase
-      .from("profiles")
-      .select("share_code")
-      .eq("id", user.id)
-      .single()
-      .then(({ data, error }) => {
-        if (!error && data) setShareCode(data.share_code ?? "");
-      });
-  }, [user, profile?.role, supabase]);
+    setShareCode(profile.share_code ?? "");
+  }, [user, profile?.role, profile?.share_code]);
 
   const email = user?.email ?? "";
   const username = labelForAuthEmail(email);
@@ -144,7 +141,13 @@ export function UserProfileScreen({ onBack }: UserProfileScreenProps) {
     });
     setLinking(false);
     if (error) {
-      setLinkError(error.message);
+      if (error.code === "PGRST202" || error.message.includes("function")) {
+        setLinkError(
+          "La funcion de vinculacion no existe. Ejecuta supabase/schema-complete.sql en el SQL Editor de Supabase."
+        );
+      } else {
+        setLinkError(error.message);
+      }
       return;
     }
     const result = data as {

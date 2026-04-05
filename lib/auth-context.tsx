@@ -68,14 +68,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         const { data, error } = await supabase
           .from("profiles")
-          .select("id, display_name, role, professor_id")
+          .select("id, display_name, role, professor_id, share_code")
           .eq("id", userId)
           .maybeSingle();
 
         if (seq !== profileLoadSeq.current) return;
 
         if (data) {
-          setProfile(data as UserProfile);
+          const rawRole = (data.role ?? "").toString().trim().toLowerCase();
+          setProfile({
+            ...data,
+            role: rawRole === "professor" ? "professor" : "student",
+          } as UserProfile);
           return;
         }
 
