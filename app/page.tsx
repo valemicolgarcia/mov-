@@ -7,18 +7,28 @@ import { DaysList } from "@/components/workout/days-list";
 import { WorkoutDetail } from "@/components/workout/workout-detail";
 import { RoutineEditor } from "@/components/workout/routine-editor";
 import { WorkoutHistory } from "@/components/workout/workout-history";
+import { ExtraSessionForm } from "@/components/workout/extra-session-form";
+import { ProfessorDashboard } from "@/components/professor/dashboard";
+import { StudentDetail } from "@/components/professor/student-detail";
 import { useWorkoutStore } from "@/lib/store";
 import { useAuth } from "@/lib/auth-context";
+import type { StudentSummary } from "@/lib/professor-store";
 import { Loader2 } from "lucide-react";
 
-type View = "list" | "detail" | "editor" | "history";
+type StudentView = "list" | "detail" | "editor" | "history" | "extra";
+type ProfessorView = "dashboard" | "student-detail";
 
 export default function Home() {
-  const { user, loading: authLoading, signOut } = useAuth();
+  const { user, profile, loading: authLoading, signOut } = useAuth();
   const store = useWorkoutStore();
   const router = useRouter();
-  const [view, setView] = useState<View>("list");
+
+  const [studentView, setStudentView] = useState<StudentView>("list");
+  const [professorView, setProfessorView] = useState<ProfessorView>("dashboard");
   const [selectedDayId, setSelectedDayId] = useState<string | null>(null);
+  const [selectedStudent, setSelectedStudent] = useState<StudentSummary | null>(
+    null
+  );
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -30,7 +40,46 @@ export default function Home() {
     ? store.routine.find((d) => d.id === selectedDayId)
     : null;
 
-  if (authLoading || store.loading || !user) {
+  if (authLoading || !user || !profile) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  // ---- PROFESSOR VIEW ----
+  if (profile.role === "professor") {
+    return (
+      <main className="min-h-screen bg-background">
+        <AnimatePresence mode="wait">
+          {professorView === "student-detail" && selectedStudent ? (
+            <StudentDetail
+              key="student-detail"
+              student={selectedStudent}
+              onBack={() => {
+                setSelectedStudent(null);
+                setProfessorView("dashboard");
+              }}
+            />
+          ) : (
+            <ProfessorDashboard
+              key="dashboard"
+              professorName={profile.display_name}
+              onSelectStudent={(s) => {
+                setSelectedStudent(s);
+                setProfessorView("student-detail");
+              }}
+              onSignOut={signOut}
+            />
+          )}
+        </AnimatePresence>
+      </main>
+    );
+  }
+
+  // ---- STUDENT VIEW ----
+  if (store.loading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -41,24 +90,24 @@ export default function Home() {
   const handleEditSession = async (dayId: string, date: string) => {
     await store.startEditingHistory(dayId, date);
     setSelectedDayId(dayId);
-    setView("detail");
+    setStudentView("detail");
   };
 
   const handleBackFromDetail = async () => {
     if (store.editingDate) {
       await store.stopEditingHistory();
       setSelectedDayId(null);
-      setView("history");
+      setStudentView("history");
     } else {
       setSelectedDayId(null);
-      setView("list");
+      setStudentView("list");
     }
   };
 
   return (
     <main className="min-h-screen bg-background">
       <AnimatePresence mode="wait">
-        {view === "editor" ? (
+        {studentView === "editor" ? (
           <RoutineEditor
             key="editor"
             routine={store.routine}
@@ -67,17 +116,23 @@ export default function Home() {
             onExport={store.exportRoutine}
             onBack={() => {
               store.reload();
-              setView("list");
+              setStudentView("list");
             }}
           />
-        ) : view === "history" ? (
+        ) : studentView === "history" ? (
           <WorkoutHistory
             key="history"
             store={store}
-            onBack={() => setView("list")}
+            onBack={() => setStudentView("list")}
             onEditSession={handleEditSession}
           />
-        ) : view === "detail" && selectedDay ? (
+        ) : studentView === "extra" ? (
+          <ExtraSessionForm
+            key="extra"
+            onBack={() => setStudentView("list")}
+            onSaved={() => setStudentView("list")}
+          />
+        ) : studentView === "detail" && selectedDay ? (
           <WorkoutDetail
             key={`detail-${store.editingDate || "today"}`}
             day={selectedDay}
@@ -91,10 +146,11 @@ export default function Home() {
             getDayProgress={store.getDayProgress}
             onSelectDay={(id) => {
               setSelectedDayId(id);
-              setView("detail");
+              setStudentView("detail");
             }}
-            onEditRoutine={() => setView("editor")}
-            onViewHistory={() => setView("history")}
+            onEditRoutine={() => setStudentView("editor")}
+            onViewHistory={() => setStudentView("history")}
+            onAddExtra={() => setStudentView("extra")}
             onSignOut={signOut}
           />
         )}
