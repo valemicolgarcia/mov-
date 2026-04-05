@@ -57,8 +57,19 @@ export function UserProfileScreen({ onBack }: UserProfileScreenProps) {
 
   useEffect(() => {
     if (!user || profile?.role !== "professor") return;
-    setShareCode(profile.share_code ?? "");
-  }, [user, profile?.role, profile?.share_code]);
+    let cancelled = false;
+    supabase
+      .from("profiles")
+      .select("share_code")
+      .eq("id", user.id)
+      .single()
+      .then(({ data, error }) => {
+        if (!cancelled && !error && data) {
+          setShareCode(data.share_code ?? "");
+        }
+      });
+    return () => { cancelled = true; };
+  }, [user, profile?.role, supabase]);
 
   const email = user?.email ?? "";
   const username = labelForAuthEmail(email);
@@ -93,21 +104,20 @@ export function UserProfileScreen({ onBack }: UserProfileScreenProps) {
         const msg = updErr.message;
         setShareCodeError(
           msg.includes("share_code") || msg.toLowerCase().includes("column")
-            ? "En Supabase falta la columna share_code. Ejecuta supabase/schema-v3.sql en el SQL Editor."
+            ? "Falta la columna share_code. Ejecuta supabase/schema-complete.sql en el SQL Editor de Supabase."
             : msg
         );
       } else if (rpcErr) {
         setShareCodeError(
           rpcErr.message.includes("function") || rpcErr.code === "PGRST202"
-            ? "Ejecuta tambien supabase/schema-v3.2-share-code-rpc.sql en Supabase, o revisa el error: " +
-                rpcErr.message
+            ? "La funcion no existe. Ejecuta supabase/schema-complete.sql en el SQL Editor de Supabase."
             : rpcErr.message
         );
       } else if (rpc?.error === "no_profile_row") {
         setShareCodeError("No se encontro tu perfil en la base de datos.");
       } else {
         setShareCodeError(
-          "No se pudo guardar. Revisa que exista la columna share_code (schema-v3.sql)."
+          "No se pudo guardar. Ejecuta supabase/schema-complete.sql en el SQL Editor de Supabase."
         );
       }
     }
