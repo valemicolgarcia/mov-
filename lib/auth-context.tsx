@@ -43,14 +43,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const loadProfile = useCallback(
     async (userId: string) => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("profiles")
-        .select("id, display_name, role, professor_id, share_code")
+        .select("id, display_name, role, professor_id")
         .eq("id", userId)
         .single();
 
       if (data) {
         setProfile(data as UserProfile);
+        return;
+      }
+
+      const {
+        data: { user: u },
+      } = await supabase.auth.getUser();
+      if (u?.id === userId) {
+        setProfile({
+          id: userId,
+          display_name:
+            (u.user_metadata?.display_name as string) ??
+            u.email?.split("@")[0] ??
+            "Usuario",
+          role:
+            (u.user_metadata?.role as "professor" | "student") ?? "student",
+        });
+        return;
+      }
+
+      if (error) {
+        console.error("[auth] profiles load:", error.message);
       }
     },
     [supabase]

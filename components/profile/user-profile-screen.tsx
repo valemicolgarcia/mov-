@@ -51,10 +51,16 @@ export function UserProfileScreen({ onBack }: UserProfileScreenProps) {
   }, [profile?.professor_id, user, supabase]);
 
   useEffect(() => {
-    if (profile?.role === "professor") {
-      setShareCode(profile.share_code ?? "");
-    }
-  }, [profile?.role, profile?.share_code]);
+    if (!user || profile?.role !== "professor") return;
+    supabase
+      .from("profiles")
+      .select("share_code")
+      .eq("id", user.id)
+      .single()
+      .then(({ data, error }) => {
+        if (!error && data) setShareCode(data.share_code ?? "");
+      });
+  }, [user, profile?.role, supabase]);
 
   const email = user?.email ?? "";
   const username = labelForAuthEmail(email);
