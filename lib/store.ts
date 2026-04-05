@@ -333,6 +333,37 @@ export function useWorkoutStore() {
     [routine, todayLogs]
   );
 
+  const getExtraSessions = useCallback(
+    async (limit = 50): Promise<{
+      data: Array<{
+        id: string;
+        user_id: string;
+        date: string;
+        activity_type: string;
+        duration_minutes: number | null;
+        notes: string | null;
+        metrics: Record<string, number>;
+        created_at?: string;
+      }>;
+      error: string | null;
+    }> => {
+      if (!user) return { data: [], error: null };
+      const { data, error } = await supabase
+        .from("extra_sessions")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("date", { ascending: false })
+        .limit(limit);
+
+      if (error) {
+        console.error("[extra_sessions] getExtraSessions:", error.message);
+        return { data: [], error: error.message };
+      }
+      return { data: data ?? [], error: null };
+    },
+    [user, supabase]
+  );
+
   // Get full workout history (all past sessions)
   const getWorkoutHistory = useCallback(
     async (limit = 30) => {
@@ -488,6 +519,7 @@ export function useWorkoutStore() {
     getExerciseHistory,
     getLastSession,
     getWorkoutHistory,
+    getExtraSessions,
     getDayProgress,
     startEditingHistory,
     stopEditingHistory,

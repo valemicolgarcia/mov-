@@ -45,30 +45,54 @@ export function ExtraSessionForm({ onBack, onSaved }: ExtraSessionFormProps) {
   const [date, setDate] = useState(() => localDateStr());
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState("");
 
   const finalActivity =
-    activityType === "Otro" ? customActivity : activityType;
+    activityType === "Otro" ? customActivity.trim() : activityType;
 
   const handleSave = async () => {
     if (!user || !finalActivity) return;
     setSaving(true);
+    setSaveError("");
 
     const metrics: Record<string, number> = {};
-    if (steps) metrics.steps = parseInt(steps);
-    if (distance) metrics.distance_km = parseFloat(distance);
+    if (steps.trim()) {
+      const s = parseInt(steps, 10);
+      if (Number.isFinite(s) && s >= 0) metrics.steps = s;
+    }
+    if (distance.trim()) {
+      const d = parseFloat(distance);
+      if (Number.isFinite(d) && d >= 0) metrics.distance_km = d;
+    }
 
-    await supabase.from("extra_sessions").insert({
-      user_id: user.id,
-      date,
-      activity_type: finalActivity,
-      duration_minutes: duration ? parseInt(duration) : null,
-      notes: notes || null,
-      metrics,
-    });
+    let durationMinutes: number | null = null;
+    if (duration.trim()) {
+      const m = parseInt(duration, 10);
+      durationMinutes = Number.isFinite(m) && m >= 0 ? m : null;
+    }
 
-    setSaving(false);
-    setSaved(true);
-    setTimeout(() => onSaved(), 500);
+    try {
+      const { error } = await supabase.from("extra_sessions").insert({
+        user_id: user.id,
+        date,
+        activity_type: finalActivity,
+        duration_minutes: durationMinutes,
+        notes: notes.trim() || null,
+        metrics,
+      });
+
+      if (error) {
+        setSaveError(error.message);
+        return;
+      }
+
+      setSaved(true);
+      setTimeout(() => onSaved(), 500);
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : "Error al guardar");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const showSteps = ["Caminar", "Correr", "Senderismo"].includes(activityType);
@@ -244,6 +268,12 @@ export function ExtraSessionForm({ onBack, onSaved }: ExtraSessionFormProps) {
             />
           </div>
         </div>
+
+        {saveError && (
+          <p className="rounded-xl bg-destructive/10 px-4 py-3 text-sm text-destructive">
+            {saveError}
+          </p>
+        )}
 
         {/* Save button */}
         <button

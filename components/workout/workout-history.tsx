@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowLeft,
@@ -10,6 +10,9 @@ import {
   CheckCircle2,
   Pencil,
   Download,
+  Activity,
+  Clock,
+  Footprints,
 } from "lucide-react";
 import type { WorkoutDay, WorkoutLog, SetLog } from "@/lib/workout-data";
 import type { useWorkoutStore } from "@/lib/store";
@@ -21,18 +24,83 @@ interface WorkoutHistoryProps {
   onEditSession: (dayId: string, date: string) => void;
 }
 
+type ExtraSessionRow = {
+  id: string;
+  date: string;
+  activity_type: string;
+  duration_minutes: number | null;
+  notes: string | null;
+  metrics: Record<string, number>;
+};
+
 export function WorkoutHistory({ store, onBack, onEditSession }: WorkoutHistoryProps) {
+  const { getWorkoutHistory, getExtraSessions } = store;
   const [history, setHistory] = useState<WorkoutLog[]>([]);
+  const [extras, setExtras] = useState<ExtraSessionRow[]>([]);
+  const [extrasLoadError, setExtrasLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [receiptLog, setReceiptLog] = useState<WorkoutLog | null>(null);
+  const isMounted = useRef(true);
 
   useEffect(() => {
-    store.getWorkoutHistory(50).then((data) => {
-      setHistory(data as WorkoutLog[]);
-      setLoading(false);
-    });
-  }, [store]);
+    isMounted.current = true;
+    return () => {
+      isMounted.current = false;
+    };
+  }, []);
+
+  const loadHistory = useCallback(() => {
+    const fetchExtras =
+      typeof getExtraSessions === "function"
+        ? getExtraSessions(50)
+        : Promise.resolve({ data: [], error: null });
+
+    return Promise.all([getWorkoutHistory(50), fetchExtras]).then(
+      ([logs, extrasResult]) => {
+        if (!isMounted.current) return;
+        setHistory(logs as WorkoutLog[]);
+        setExtrasLoadError(null);
+        if (
+          extrasResult &&
+          typeof extrasResult === "object" &&
+          "data" in extrasResult
+        ) {
+          setExtras((extrasResult.data as ExtraSessionRow[]) ?? []);
+          setExtrasLoadError(extrasResult.error ?? null);
+        } else {
+          setExtras((extrasResult as ExtraSessionRow[]) ?? []);
+        }
+      }
+    );
+  }, [getWorkoutHistory, getExtraSessions]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    loadHistory()
+      .catch(() => {
+        if (!cancelled) {
+          setHistory([]);
+          setExtras([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [loadHistory]);
+
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState !== "visible") return;
+      void loadHistory();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, [loadHistory]);
 
   const getDayInfo = (dayId: string): WorkoutDay | undefined => {
     return store.routine.find((d) => d.id === dayId);
@@ -73,6 +141,16 @@ export function WorkoutHistory({ store, onBack, onEditSession }: WorkoutHistoryP
     groupedByDate[log.date].push(log);
   }
 
+  const extrasByDate: Record<string, ExtraSessionRow[]> = {};
+  for (const ex of extras) {
+    if (!extrasByDate[ex.date]) extrasByDate[ex.date] = [];
+    extrasByDate[ex.date].push(ex);
+  }
+
+  const allDates = Array.from(
+    new Set([...Object.keys(groupedByDate), ...Object.keys(extrasByDate)])
+  ).sort((a, b) => b.localeCompare(a));
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -95,7 +173,7 @@ export function WorkoutHistory({ store, onBack, onEditSession }: WorkoutHistoryP
                 Historial
               </h1>
               <p className="text-xs text-muted-foreground">
-                Entrenamientos completados
+                Rutina y actividades extra
               </p>
             </div>
           </div>
@@ -103,20 +181,28 @@ export function WorkoutHistory({ store, onBack, onEditSession }: WorkoutHistoryP
       </div>
 
       <div className="mx-auto max-w-lg px-4 py-6">
+        {extrasLoadError && (
+          <div className="mb-4 rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+            No se pudieron cargar las actividades extra: {extrasLoadError}
+          </div>
+        )}
         {loading ? (
           <div className="flex items-center justify-center py-16">
             <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
           </div>
-        ) : history.length === 0 ? (
+        ) : history.length === 0 && extras.length === 0 ? (
           <div className="flex flex-col items-center gap-4 py-16">
             <Dumbbell className="h-12 w-12 text-muted-foreground" />
             <p className="text-sm text-muted-foreground">
-              Todavía no completaste ningún entrenamiento
+              Todavía no completaste ningún entrenamiento ni actividad extra
             </p>
           </div>
         ) : (
           <div className="space-y-6">
-            {Object.entries(groupedByDate).map(([date, logs]) => (
+            {allDates.map((date) => {
+              const logs = groupedByDate[date] ?? [];
+              const dayExtras = extrasByDate[date] ?? [];
+              return (
               <div key={date}>
                 <div className="mb-3 flex items-center gap-2">
                   <Calendar className="h-4 w-4 text-primary" />
@@ -242,9 +328,52 @@ export function WorkoutHistory({ store, onBack, onEditSession }: WorkoutHistoryP
                       </div>
                     );
                   })}
+                  {dayExtras.map((ex) => (
+                    <div
+                      key={`extra-${ex.id}`}
+                      className="overflow-hidden rounded-2xl border border-border bg-card"
+                    >
+                      <div className="flex items-center gap-3 p-4">
+                        <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-500/15">
+                          <Activity className="h-5 w-5 text-blue-400" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <h3 className="text-sm font-bold text-foreground">
+                            {ex.activity_type}
+                          </h3>
+                          <p className="text-xs text-blue-400/90">
+                            Actividad extra
+                          </p>
+                          <div className="mt-1 flex flex-wrap gap-3 text-xs text-muted-foreground">
+                            {ex.duration_minutes != null && (
+                              <span className="flex items-center gap-1">
+                                <Clock className="h-3 w-3" />
+                                {ex.duration_minutes} min
+                              </span>
+                            )}
+                            {ex.metrics?.steps != null && (
+                              <span className="flex items-center gap-1">
+                                <Footprints className="h-3 w-3" />
+                                {ex.metrics.steps.toLocaleString()} pasos
+                              </span>
+                            )}
+                            {ex.metrics?.distance_km != null && (
+                              <span>{ex.metrics.distance_km} km</span>
+                            )}
+                          </div>
+                          {ex.notes && (
+                            <p className="mt-2 text-xs text-muted-foreground">
+                              {ex.notes}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
-            ))}
+            );
+            })}
           </div>
         )}
       </div>
