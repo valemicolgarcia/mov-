@@ -12,6 +12,7 @@ import {
   Clock,
   Timer,
   ListChecks,
+  Youtube,
 } from "lucide-react";
 import type { WorkoutDay, Block, Exercise } from "@/lib/workout-data";
 
@@ -411,6 +412,30 @@ export function DayEditor({ day, onSave, onBack }: DayEditorProps) {
                                     placeholder="Nombre del ejercicio"
                                     className="w-full rounded-lg bg-background px-3 py-2 text-sm font-semibold text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                                   />
+
+                                  <div>
+                                    <label className="mb-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+                                      <Youtube className="h-3.5 w-3.5 shrink-0 text-red-500" />
+                                      Video (YouTube)
+                                    </label>
+                                    <input
+                                      type="url"
+                                      inputMode="url"
+                                      value={exercise.videoUrl || ""}
+                                      onChange={(e) => {
+                                        const v = e.target.value.trim();
+                                        updateExercise(
+                                          block.id,
+                                          exercise.id,
+                                          {
+                                            videoUrl: v || undefined,
+                                          }
+                                        );
+                                      }}
+                                      placeholder="https://www.youtube.com/watch?v=… o Shorts"
+                                      className="w-full rounded-lg bg-background px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                                    />
+                                  </div>
 
                                   <div className="flex items-center gap-2">
                                     {/* Type toggle */}

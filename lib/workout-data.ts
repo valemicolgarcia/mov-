@@ -1,6 +1,7 @@
 export interface Exercise {
   id: string;
   name: string;
+  /** Enlace al video (p. ej. YouTube: watch, youtu.be, Shorts). */
   videoUrl?: string;
   sets: number;
   targetReps?: string;
