@@ -1,10 +1,12 @@
 "use client";
 
-import { motion } from "framer-motion";
+import { useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { ArrowLeft, Clock, Flame, Check } from "lucide-react";
 import type { WorkoutDay } from "@/lib/workout-data";
 import type { useWorkoutStore } from "@/lib/store";
 import { BlockCard } from "./block-card";
+import { WorkoutReceipt } from "./workout-receipt";
 
 interface WorkoutDetailProps {
   day: WorkoutDay;
@@ -13,6 +15,8 @@ interface WorkoutDetailProps {
 }
 
 export function WorkoutDetail({ day, store, onBack }: WorkoutDetailProps) {
+  const [showReceipt, setShowReceipt] = useState(false);
+
   const totalExercises = day.blocks.reduce(
     (acc, block) => acc + block.exercises.length,
     0
@@ -24,6 +28,11 @@ export function WorkoutDetail({ day, store, onBack }: WorkoutDetailProps) {
 
   const handleFinish = async () => {
     await store.finishWorkout(day.id);
+    setShowReceipt(true);
+  };
+
+  const handleViewReceipt = () => {
+    setShowReceipt(true);
   };
 
   return (
@@ -115,8 +124,7 @@ export function WorkoutDetail({ day, store, onBack }: WorkoutDetailProps) {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.5 }}
-          onClick={handleFinish}
-          disabled={isCompleted}
+          onClick={isCompleted ? handleViewReceipt : handleFinish}
           className={`mt-8 flex w-full items-center justify-center gap-2 rounded-2xl py-4 text-lg font-bold transition-transform active:scale-[0.98] ${
             isCompleted
               ? "bg-primary/20 text-primary"
@@ -124,11 +132,23 @@ export function WorkoutDetail({ day, store, onBack }: WorkoutDetailProps) {
           }`}
         >
           <Check className="h-5 w-5" />
-          {isCompleted ? "Entrenamiento Finalizado ✓" : "Finalizar Entrenamiento"}
+          {isCompleted ? "Ver Comprobante" : "Finalizar Entrenamiento"}
         </motion.button>
       </div>
 
       <div className="h-20" />
+
+      {/* Receipt modal */}
+      <AnimatePresence>
+        {showReceipt && dayLog && (
+          <WorkoutReceipt
+            day={day}
+            exercises={dayLog.exercises}
+            date={dayLog.date}
+            onClose={() => setShowReceipt(false)}
+          />
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }
