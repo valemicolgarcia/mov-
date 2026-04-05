@@ -51,23 +51,40 @@ export function useProfessorStore() {
 
     const studentIds = profiles.map((p) => p.id);
 
-    const { data: logs } = await supabase
-      .from("workout_logs")
-      .select("user_id, date, completed")
-      .in("user_id", studentIds)
-      .eq("completed", true)
-      .gte("date", monthStartStr)
-      .order("date", { ascending: false });
+    const [{ data: logs }, { data: extras }] = await Promise.all([
+      supabase
+        .from("workout_logs")
+        .select("user_id, date, completed")
+        .in("user_id", studentIds)
+        .eq("completed", true)
+        .gte("date", monthStartStr)
+        .order("date", { ascending: false }),
+      supabase
+        .from("extra_sessions")
+        .select("user_id, date")
+        .in("user_id", studentIds)
+        .gte("date", monthStartStr)
+        .order("date", { ascending: false }),
+    ]);
 
     const summaries: StudentSummary[] = profiles.map((p) => {
       const userLogs = logs?.filter((l) => l.user_id === p.id) || [];
+      const userExtras = extras?.filter((e) => e.user_id === p.id) || [];
+
+      const weekLogs = userLogs.filter((l) => l.date >= weekStr);
+      const weekExtras = userExtras.filter((e) => e.date >= weekStr);
+
+      const allDates = [
+        ...userLogs.map((l) => l.date),
+        ...userExtras.map((e) => e.date),
+      ].sort((a, b) => b.localeCompare(a));
 
       return {
         ...p,
         role: p.role as "professor" | "student",
-        completedThisWeek: userLogs.filter((l) => l.date >= weekStr).length,
-        completedThisMonth: userLogs.length,
-        lastWorkoutDate: userLogs[0]?.date,
+        completedThisWeek: weekLogs.length + weekExtras.length,
+        completedThisMonth: userLogs.length + userExtras.length,
+        lastWorkoutDate: allDates[0],
       };
     });
 
