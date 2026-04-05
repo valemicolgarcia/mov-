@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/lib/auth-context";
+import { localDateStr } from "@/lib/date-utils";
 
 const ACTIVITY_SUGGESTIONS = [
   "Correr",
@@ -41,7 +42,7 @@ export function ExtraSessionForm({ onBack, onSaved }: ExtraSessionFormProps) {
   const [notes, setNotes] = useState("");
   const [steps, setSteps] = useState("");
   const [distance, setDistance] = useState("");
-  const [date, setDate] = useState(() => new Date().toISOString().split("T")[0]);
+  const [date, setDate] = useState(() => localDateStr());
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 

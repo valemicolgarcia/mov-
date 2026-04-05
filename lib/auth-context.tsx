@@ -6,6 +6,7 @@ import {
   useEffect,
   useState,
   useCallback,
+  useRef,
   type ReactNode,
 } from "react";
 import { createClient } from "@/lib/supabase/client";
@@ -40,27 +41,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const supabase = createClient();
+  const profileLoadSeq = useRef(0);
 
   const buildFallbackProfile = useCallback(
-    (userId: string, u: User | null): UserProfile => ({
-      id: userId,
-      display_name:
-        (u?.user_metadata?.display_name as string) ??
-        u?.email?.split("@")[0] ??
-        "Usuario",
-      role: (u?.user_metadata?.role as "professor" | "student") ?? "student",
-    }),
+    (userId: string, u: User | null): UserProfile => {
+      const metaPid = u?.user_metadata?.professor_id;
+      return {
+        id: userId,
+        display_name:
+          (u?.user_metadata?.display_name as string) ??
+          u?.email?.split("@")[0] ??
+          "Usuario",
+        role: (u?.user_metadata?.role as "professor" | "student") ?? "student",
+        professor_id:
+          typeof metaPid === "string" && metaPid.length > 0
+            ? metaPid
+            : undefined,
+      };
+    },
     []
   );
 
   const loadProfile = useCallback(
     async (userId: string, sessionUser?: User | null) => {
+      const seq = ++profileLoadSeq.current;
       try {
         const { data, error } = await supabase
           .from("profiles")
           .select("id, display_name, role, professor_id")
           .eq("id", userId)
           .maybeSingle();
+
+        if (seq !== profileLoadSeq.current) return;
 
         if (data) {
           setProfile(data as UserProfile);
@@ -74,13 +86,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const u =
           sessionUser ??
           (await supabase.auth.getUser()).data.user;
+        if (seq !== profileLoadSeq.current) return;
         if (u?.id === userId) {
           setProfile(buildFallbackProfile(userId, u));
         }
       } catch (e) {
         console.error("[auth] loadProfile:", e);
+        if (seq !== profileLoadSeq.current) return;
         try {
-          const { data: { user: u } } = await supabase.auth.getUser();
+          const {
+            data: { user: u },
+          } = await supabase.auth.getUser();
           if (u?.id === userId) {
             setProfile(buildFallbackProfile(userId, u));
           }

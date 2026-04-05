@@ -147,17 +147,28 @@ export function UserProfileScreen({ onBack }: UserProfileScreenProps) {
       setLinkError(error.message);
       return;
     }
-    const result = data as { ok?: boolean; error?: string };
+    const result = data as {
+      ok?: boolean;
+      error?: string;
+      professor_id?: string;
+    };
     if (!result?.ok) {
       const err = result?.error;
       if (err === "invalid_credentials") {
         setLinkError("Usuario o codigo incorrectos. Pedile a tu profesor el usuario y el codigo desde su perfil.");
       } else if (err === "only_students") {
-        setLinkError("Solo los alumnos pueden vincularse a un profesor.");
+        setLinkError(
+          "Tu cuenta no esta como alumno en la base. En Supabase: Table Editor > profiles > tu fila > role = student"
+        );
       } else {
         setLinkError("No se pudo vincular. Intenta de nuevo.");
       }
       return;
+    }
+    if (result.professor_id) {
+      await supabase.auth.updateUser({
+        data: { professor_id: result.professor_id },
+      });
     }
     setLinkOk(true);
     await refreshProfile();

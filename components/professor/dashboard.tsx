@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { motion } from "framer-motion";
 import { Dumbbell, LogOut, Users, Loader2, User } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -19,7 +20,15 @@ export function ProfessorDashboard({
   onOpenProfile,
   onSignOut,
 }: ProfessorDashboardProps) {
-  const { students, loading } = useProfessorStore();
+  const { students, loading, reload } = useProfessorStore();
+
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState === "visible") reload();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, [reload]);
 
   return (
     <motion.div
@@ -111,8 +120,15 @@ export function ProfessorDashboard({
             <p className="text-sm text-muted-foreground text-center">
               Todavia no tenes alumnos vinculados.
               <br />
-              Tus alumnos deben registrarse con tu email.
+              Comparti tu usuario y codigo desde Mi perfil para que se conecten.
             </p>
+            <button
+              type="button"
+              onClick={() => reload()}
+              className="text-sm font-medium text-primary"
+            >
+              Actualizar lista
+            </button>
           </motion.div>
         ) : (
           <div className="space-y-3">

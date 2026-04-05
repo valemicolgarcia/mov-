@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth, type UserProfile } from "@/lib/auth-context";
 import type { WorkoutDay, WorkoutLog, SetLog } from "@/lib/workout-data";
+import { localDateStr } from "@/lib/date-utils";
 
 export interface ExtraSession {
   id: string;
@@ -45,6 +46,8 @@ export function useProfessorStore() {
     const weekStart = new Date(now);
     weekStart.setDate(now.getDate() - now.getDay());
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const monthStartStr = localDateStr(monthStart);
+    const weekStr = localDateStr(weekStart);
 
     const studentIds = profiles.map((p) => p.id);
 
@@ -53,12 +56,11 @@ export function useProfessorStore() {
       .select("user_id, date, completed")
       .in("user_id", studentIds)
       .eq("completed", true)
-      .gte("date", monthStart.toISOString().split("T")[0])
+      .gte("date", monthStartStr)
       .order("date", { ascending: false });
 
     const summaries: StudentSummary[] = profiles.map((p) => {
       const userLogs = logs?.filter((l) => l.user_id === p.id) || [];
-      const weekStr = weekStart.toISOString().split("T")[0];
 
       return {
         ...p,

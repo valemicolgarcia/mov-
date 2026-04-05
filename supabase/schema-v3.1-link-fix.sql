@@ -20,7 +20,7 @@ begin
   end if;
 
   select role into v_role from public.profiles where id = v_student_id;
-  if v_role is null or lower(trim(v_role)) <> 'student' then
+  if lower(trim(coalesce(v_role, 'student'))) <> 'student' then
     return json_build_object('ok', false, 'error', 'only_students');
   end if;
 

@@ -9,9 +9,10 @@ import {
   type SetLog,
   seedWorkoutDays,
 } from "@/lib/workout-data";
+import { localDateStr } from "@/lib/date-utils";
 
 function todayStr() {
-  return new Date().toISOString().split("T")[0];
+  return localDateStr();
 }
 
 export function useWorkoutStore() {
@@ -48,26 +49,29 @@ export function useWorkoutStore() {
   // Load today's logs from Supabase
   const loadTodayLogs = useCallback(async () => {
     if (!user) return;
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("workout_logs")
       .select("*")
       .eq("user_id", user.id)
       .eq("date", todayStr());
 
-    if (data) {
-      const logsMap: Record<string, WorkoutLog> = {};
-      data.forEach((log) => {
-        logsMap[log.day_id] = {
-          id: log.id,
-          user_id: log.user_id,
-          day_id: log.day_id,
-          date: log.date,
-          exercises: log.exercises as Record<string, SetLog[]>,
-          completed: log.completed,
-        };
-      });
-      setTodayLogs(logsMap);
+    if (error) {
+      console.error("[workout_logs] loadTodayLogs:", error.message);
+      return;
     }
+
+    const logsMap: Record<string, WorkoutLog> = {};
+    (data ?? []).forEach((log) => {
+      logsMap[log.day_id] = {
+        id: log.id,
+        user_id: log.user_id,
+        day_id: log.day_id,
+        date: log.date,
+        exercises: log.exercises as Record<string, SetLog[]>,
+        completed: log.completed,
+      };
+    });
+    setTodayLogs(logsMap);
   }, [user, supabase]);
 
   useEffect(() => {
@@ -89,6 +93,17 @@ export function useWorkoutStore() {
       clearTimeout(safety);
     };
   }, [user, loadRoutine, loadTodayLogs]);
+
+  useEffect(() => {
+    if (!user) return;
+    const onVis = () => {
+      if (document.visibilityState === "visible") {
+        void loadTodayLogs();
+      }
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, [user, loadTodayLogs]);
 
   // Save full routine
   const saveRoutine = useCallback(
@@ -136,12 +151,16 @@ export function useWorkoutStore() {
         completed: existing?.completed ?? false,
       };
 
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("workout_logs")
         .upsert(logData, { onConflict: "user_id,day_id,date" })
         .select()
         .single();
 
+      if (error) {
+        console.error("[workout_logs] logSet:", error.message);
+        return;
+      }
       if (data) {
         setTodayLogs((prev) => ({
           ...prev,
@@ -184,12 +203,16 @@ export function useWorkoutStore() {
         completed: existing?.completed ?? false,
       };
 
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("workout_logs")
         .upsert(logData, { onConflict: "user_id,day_id,date" })
         .select()
         .single();
 
+      if (error) {
+        console.error("[workout_logs] markExerciseComplete:", error.message);
+        return;
+      }
       if (data) {
         setTodayLogs((prev) => ({
           ...prev,
@@ -215,12 +238,17 @@ export function useWorkoutStore() {
       const existing = todayLogs[dayId];
       if (!existing) return;
 
-      await supabase
+      const { error } = await supabase
         .from("workout_logs")
         .update({ completed: true })
         .eq("user_id", user.id)
         .eq("day_id", dayId)
         .eq("date", date);
+
+      if (error) {
+        console.error("[workout_logs] finishWorkout:", error.message);
+        return;
+      }
 
       setTodayLogs((prev) => ({
         ...prev,
@@ -309,17 +337,26 @@ export function useWorkoutStore() {
   const getWorkoutHistory = useCallback(
     async (limit = 30) => {
       if (!user) return [];
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("workout_logs")
         .select("*")
         .eq("user_id", user.id)
-        .eq("completed", true)
         .order("date", { ascending: false })
-        .limit(limit);
+        .limit(limit * 2);
 
+      if (error) {
+        console.error("[workout_logs] getWorkoutHistory:", error.message);
+        return [];
+      }
       if (!data) return [];
 
-      return data.map((log) => ({
+      const rows = data.filter((log) => {
+        const ex = log.exercises as Record<string, SetLog[]>;
+        const hasKeys = ex && Object.keys(ex).length > 0;
+        return log.completed === true || hasKeys;
+      });
+
+      return rows.slice(0, limit).map((log) => ({
         id: log.id,
         day_id: log.day_id,
         date: log.date,
