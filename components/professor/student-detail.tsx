@@ -34,7 +34,13 @@ interface StudentDetailProps {
 }
 
 export function StudentDetail({ student, onBack }: StudentDetailProps) {
-  const store = useProfessorStore();
+  const {
+    getStudentRoutine,
+    getStudentLogs,
+    getStudentExtraSessions,
+    saveStudentRoutine,
+    getExerciseProgressData,
+  } = useProfessorStore();
   const [tab, setTab] = useState<Tab>("calendar");
   const [routine, setRoutine] = useState<WorkoutDay[]>([]);
   const [logs, setLogs] = useState<WorkoutLog[]>([]);
@@ -45,18 +51,30 @@ export function StudentDetail({ student, onBack }: StudentDetailProps) {
 
   const loadData = useCallback(async () => {
     const [r, l, e] = await Promise.all([
-      store.getStudentRoutine(student.id),
-      store.getStudentLogs(student.id),
-      store.getStudentExtraSessions(student.id),
+      getStudentRoutine(student.id),
+      getStudentLogs(student.id),
+      getStudentExtraSessions(student.id),
     ]);
     setRoutine(r);
     setLogs(l);
     setExtras(e);
-  }, [store, student.id]);
+  }, [
+    getStudentRoutine,
+    getStudentLogs,
+    getStudentExtraSessions,
+    student.id,
+  ]);
 
   useEffect(() => {
+    let cancelled = false;
     setLoading(true);
-    loadData().finally(() => setLoading(false));
+    loadData()
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [loadData]);
 
   const getDayName = (dayId: string): string => {
@@ -95,14 +113,14 @@ export function StudentDetail({ student, onBack }: StudentDetailProps) {
       <RoutineEditor
         routine={routine}
         onSave={async (days) => {
-          await store.saveStudentRoutine(student.id, days);
+          await saveStudentRoutine(student.id, days);
           setRoutine(days);
         }}
         onImport={async (json) => {
           try {
             const parsed = JSON.parse(json);
             if (!Array.isArray(parsed)) return false;
-            await store.saveStudentRoutine(student.id, parsed);
+            await saveStudentRoutine(student.id, parsed);
             setRoutine(parsed);
             return true;
           } catch {
@@ -381,7 +399,7 @@ export function StudentDetail({ student, onBack }: StudentDetailProps) {
               <ExerciseProgress
                 routine={routine}
                 studentId={student.id}
-                store={store}
+                getExerciseProgressData={getExerciseProgressData}
                 onBack={() => setTab("calendar")}
               />
             )}

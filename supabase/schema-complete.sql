@@ -96,15 +96,25 @@ drop policy if exists "Professors can view student profiles" on public.profiles;
 create policy "Professors can view student profiles"
   on public.profiles for select using (professor_id = auth.uid());
 
+-- Funcion auxiliar: lee professor_id del usuario actual SIN pasar por RLS
+-- (evita recursion infinita en la policy de abajo)
+create or replace function public.my_professor_id()
+returns uuid
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select professor_id from public.profiles where id = auth.uid();
+$$;
+
+alter function public.my_professor_id() owner to postgres;
+grant execute on function public.my_professor_id() to authenticated;
+
 drop policy if exists "Students can view linked professor profile" on public.profiles;
 create policy "Students can view linked professor profile"
   on public.profiles for select
-  using (
-    id = (
-      select p.professor_id from public.profiles p
-      where p.id = auth.uid() and p.professor_id is not null
-    )
-  );
+  using ( id = public.my_professor_id() );
 
 -- routines
 drop policy if exists "Users can view own routine" on public.routines;

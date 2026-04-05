@@ -21,12 +21,14 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import type { WorkoutDay, SetLog } from "@/lib/workout-data";
-import type { useProfessorStore } from "@/lib/professor-store";
 
 interface ExerciseProgressProps {
   routine: WorkoutDay[];
   studentId: string;
-  store: ReturnType<typeof useProfessorStore>;
+  getExerciseProgressData: (
+    studentId: string,
+    exerciseId: string
+  ) => Promise<{ date: string; sets: SetLog[] }[]>;
   onBack: () => void;
 }
 
@@ -40,7 +42,7 @@ interface ProgressEntry {
 export function ExerciseProgress({
   routine,
   studentId,
-  store,
+  getExerciseProgressData,
   onBack,
 }: ExerciseProgressProps) {
   const [selectedDayId, setSelectedDayId] = useState<string | null>(null);
@@ -63,8 +65,7 @@ export function ExerciseProgress({
       return;
     }
     setLoadingProgress(true);
-    store
-      .getExerciseProgressData(studentId, selectedExerciseId)
+    getExerciseProgressData(studentId, selectedExerciseId)
       .then((data) => {
         const entries: ProgressEntry[] = data.map((d) => {
           const completedSets = d.sets.filter((s) => s?.completed);
@@ -84,7 +85,7 @@ export function ExerciseProgress({
         setProgressData(entries);
       })
       .finally(() => setLoadingProgress(false));
-  }, [selectedExerciseId, studentId, store]);
+  }, [selectedExerciseId, studentId, getExerciseProgressData]);
 
   const getTrend = (
     data: ProgressEntry[]
