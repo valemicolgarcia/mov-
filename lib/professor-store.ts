@@ -3,7 +3,12 @@
 import { useState, useEffect, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth, type UserProfile } from "@/lib/auth-context";
-import type { WorkoutDay, WorkoutLog, SetLog } from "@/lib/workout-data";
+import {
+  workoutLogHasActivity,
+  type WorkoutDay,
+  type WorkoutLog,
+  type SetLog,
+} from "@/lib/workout-data";
 import { localDateStr } from "@/lib/date-utils";
 
 export interface ExtraSession {
@@ -54,9 +59,8 @@ export function useProfessorStore() {
     const [{ data: logs }, { data: extras }] = await Promise.all([
       supabase
         .from("workout_logs")
-        .select("user_id, date, completed")
+        .select("user_id, date, completed, exercises")
         .in("user_id", studentIds)
-        .eq("completed", true)
         .gte("date", monthStartStr)
         .order("date", { ascending: false }),
       supabase
@@ -68,7 +72,15 @@ export function useProfessorStore() {
     ]);
 
     const summaries: StudentSummary[] = profiles.map((p) => {
-      const userLogs = logs?.filter((l) => l.user_id === p.id) || [];
+      const userLogs =
+        logs?.filter(
+          (l) =>
+            l.user_id === p.id &&
+            workoutLogHasActivity({
+              completed: l.completed,
+              exercises: (l.exercises ?? {}) as Record<string, SetLog[]>,
+            })
+        ) || [];
       const userExtras = extras?.filter((e) => e.user_id === p.id) || [];
 
       const weekLogs = userLogs.filter((l) => l.date >= weekStr);

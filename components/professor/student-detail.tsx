@@ -16,7 +16,12 @@ import {
   Activity,
   Footprints,
 } from "lucide-react";
-import type { WorkoutDay, WorkoutLog, SetLog } from "@/lib/workout-data";
+import {
+  workoutLogHasActivity,
+  type WorkoutDay,
+  type WorkoutLog,
+  type SetLog,
+} from "@/lib/workout-data";
 import {
   useProfessorStore,
   type StudentSummary,
@@ -102,7 +107,9 @@ export function StudentDetail({ student, onBack }: StudentDetailProps) {
   };
 
   const selectedDayLogs = selectedDate
-    ? logs.filter((l) => l.date === selectedDate && l.completed)
+    ? logs.filter(
+        (l) => l.date === selectedDate && workoutLogHasActivity(l)
+      )
     : [];
   const selectedDayExtras = selectedDate
     ? extras.filter((e) => e.date === selectedDate)

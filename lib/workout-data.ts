@@ -44,6 +44,16 @@ export interface WorkoutLog {
   completed: boolean;
 }
 
+/** True if the log should appear in historial / vista profesor (no solo al marcar "terminar día"). */
+export function workoutLogHasActivity(
+  log: Pick<WorkoutLog, "completed" | "exercises">
+): boolean {
+  if (log.completed) return true;
+  const ex = log.exercises;
+  if (!ex || typeof ex !== "object") return false;
+  return Object.keys(ex).length > 0;
+}
+
 export const seedWorkoutDays: WorkoutDay[] = [
   // ===== DÍA 1: PIERNAS Y GLÚTEOS =====
   {

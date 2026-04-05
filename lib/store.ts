@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import {
+  workoutLogHasActivity,
   type WorkoutDay,
   type WorkoutLog,
   type SetLog,
@@ -431,11 +432,12 @@ export function useWorkoutStore() {
       }
       if (!data) return [];
 
-      const rows = data.filter((log) => {
-        const ex = log.exercises as Record<string, SetLog[]>;
-        const hasKeys = ex && Object.keys(ex).length > 0;
-        return log.completed === true || hasKeys;
-      });
+      const rows = data.filter((log) =>
+        workoutLogHasActivity({
+          completed: log.completed,
+          exercises: log.exercises as Record<string, SetLog[]>,
+        })
+      );
 
       return rows.slice(0, limit).map((log) => ({
         id: log.id,

@@ -3,7 +3,11 @@
 import { useState, useMemo } from "react";
 import { motion } from "framer-motion";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import type { WorkoutLog, WorkoutDay } from "@/lib/workout-data";
+import {
+  workoutLogHasActivity,
+  type WorkoutDay,
+  type WorkoutLog,
+} from "@/lib/workout-data";
 import type { ExtraSession } from "@/lib/professor-store";
 
 interface StudentCalendarProps {
@@ -84,7 +88,7 @@ export function StudentCalendar({
   const completedLogs = useMemo(() => {
     return logs.filter(
       (l) =>
-        l.completed &&
+        workoutLogHasActivity(l) &&
         new Date(l.date + "T12:00:00").getMonth() === currentMonth.month &&
         new Date(l.date + "T12:00:00").getFullYear() === currentMonth.year
     );
@@ -145,7 +149,8 @@ export function StudentCalendar({
           const dateStr = `${currentMonth.year}-${String(
             currentMonth.month + 1
           ).padStart(2, "0")}-${String(dayNum).padStart(2, "0")}`;
-          const dayLogs = logsByDate[dateStr]?.filter((l) => l.completed) || [];
+          const dayLogs =
+            logsByDate[dateStr]?.filter((l) => workoutLogHasActivity(l)) || [];
           const dayExtras = extraByDate[dateStr] || [];
           const hasActivity = dayLogs.length > 0 || dayExtras.length > 0;
 
