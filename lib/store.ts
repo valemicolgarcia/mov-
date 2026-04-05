@@ -319,6 +319,53 @@ export function useWorkoutStore() {
     [user, supabase]
   );
 
+  // Update a specific exercise's sets in a past workout log
+  const updateHistoryLog = useCallback(
+    async (
+      dayId: string,
+      date: string,
+      exerciseId: string,
+      setIndex: number,
+      weight: number,
+      reps: number
+    ) => {
+      if (!user) return;
+
+      const { data: existing } = await supabase
+        .from("workout_logs")
+        .select("exercises")
+        .eq("user_id", user.id)
+        .eq("day_id", dayId)
+        .eq("date", date)
+        .single();
+
+      if (!existing) return;
+
+      const exercises = {
+        ...(existing.exercises as Record<string, SetLog[]>),
+      };
+      if (!exercises[exerciseId]) exercises[exerciseId] = [];
+      const sets = [...exercises[exerciseId]];
+      sets[setIndex] = { weight, reps, completed: true };
+      exercises[exerciseId] = sets;
+
+      await supabase
+        .from("workout_logs")
+        .update({ exercises })
+        .eq("user_id", user.id)
+        .eq("day_id", dayId)
+        .eq("date", date);
+
+      if (date === todayStr()) {
+        setTodayLogs((prev) => ({
+          ...prev,
+          [dayId]: { ...prev[dayId], exercises },
+        }));
+      }
+    },
+    [user, supabase]
+  );
+
   // Import routine from JSON
   const importRoutine = useCallback(
     async (json: string): Promise<boolean> => {
@@ -351,6 +398,7 @@ export function useWorkoutStore() {
     getLastSession,
     getWorkoutHistory,
     getDayProgress,
+    updateHistoryLog,
     importRoutine,
     exportRoutine,
     reload: () => Promise.all([loadRoutine(), loadTodayLogs()]),
