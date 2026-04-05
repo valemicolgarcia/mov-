@@ -121,7 +121,7 @@ export function WorkoutDetail({ day, store, onBack }: WorkoutDetailProps) {
           <div className="mx-auto flex max-w-lg items-center gap-2 px-4 py-2.5">
             <Calendar className="h-4 w-4 text-orange-400" />
             <span className="text-sm font-medium text-orange-400">
-              Editando sesión del {formatEditDate(store.editingDate)}
+              Fecha: {formatEditDate(store.editingDate)}
             </span>
           </div>
         </div>

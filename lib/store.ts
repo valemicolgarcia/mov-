@@ -410,7 +410,7 @@ export function useWorkoutStore() {
         .eq("user_id", user.id)
         .eq("day_id", dayId)
         .eq("date", date)
-        .single();
+        .maybeSingle();
 
       if (data) {
         setTodayLogs({

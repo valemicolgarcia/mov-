@@ -36,6 +36,10 @@ export default function Home() {
   const [selectedStudent, setSelectedStudent] = useState<StudentSummary | null>(
     null
   );
+  const [extraLaunch, setExtraLaunch] = useState<{
+    returnTo: "list" | "history";
+    initialDate?: string;
+  } | null>(null);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -131,6 +135,15 @@ export default function Home() {
     setStudentView("detail");
   };
 
+  const handleStartPastRoutineFromHistory = async (
+    dayId: string,
+    date: string
+  ) => {
+    await store.startEditingHistory(dayId, date);
+    setSelectedDayId(dayId);
+    setStudentView("detail");
+  };
+
   const handleBackFromDetail = async () => {
     if (store.editingDate) {
       await store.stopEditingHistory();
@@ -163,12 +176,26 @@ export default function Home() {
             store={store}
             onBack={() => setStudentView("list")}
             onEditSession={handleEditSession}
+            onStartPastRoutine={handleStartPastRoutineFromHistory}
+            onStartPastExtra={(date) => {
+              setExtraLaunch({ returnTo: "history", initialDate: date });
+              setStudentView("extra");
+            }}
           />
         ) : studentView === "extra" ? (
           <ExtraSessionForm
-            key="extra"
-            onBack={() => setStudentView("list")}
-            onSaved={() => setStudentView("list")}
+            key={`extra-${extraLaunch?.returnTo ?? "list"}-${extraLaunch?.initialDate ?? "today"}`}
+            initialDate={extraLaunch?.initialDate}
+            onBack={() => {
+              const r = extraLaunch?.returnTo ?? "list";
+              setExtraLaunch(null);
+              setStudentView(r);
+            }}
+            onSaved={() => {
+              const r = extraLaunch?.returnTo ?? "list";
+              setExtraLaunch(null);
+              setStudentView(r);
+            }}
           />
         ) : studentView === "profile" ? (
           <UserProfileScreen
@@ -193,7 +220,10 @@ export default function Home() {
             }}
             onEditRoutine={() => setStudentView("editor")}
             onViewHistory={() => setStudentView("history")}
-            onAddExtra={() => setStudentView("extra")}
+            onAddExtra={() => {
+              setExtraLaunch({ returnTo: "list" });
+              setStudentView("extra");
+            }}
             onOpenProfile={() => setStudentView("profile")}
             onSignOut={signOut}
           />

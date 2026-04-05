@@ -13,15 +13,21 @@ import {
   Activity,
   Clock,
   Footprints,
+  Plus,
 } from "lucide-react";
 import type { WorkoutDay, WorkoutLog, SetLog } from "@/lib/workout-data";
 import type { useWorkoutStore } from "@/lib/store";
 import { WorkoutReceipt } from "./workout-receipt";
+import { localDateStr } from "@/lib/date-utils";
 
 interface WorkoutHistoryProps {
   store: ReturnType<typeof useWorkoutStore>;
   onBack: () => void;
   onEditSession: (dayId: string, date: string) => void;
+  /** Abre el detalle del día de rutina como si fuera “hoy”, para una fecha pasada */
+  onStartPastRoutine: (dayId: string, date: string) => void | Promise<void>;
+  /** Abre el formulario de actividad extra con una fecha */
+  onStartPastExtra: (date: string) => void;
 }
 
 type ExtraSessionRow = {
@@ -33,7 +39,13 @@ type ExtraSessionRow = {
   metrics: Record<string, number>;
 };
 
-export function WorkoutHistory({ store, onBack, onEditSession }: WorkoutHistoryProps) {
+export function WorkoutHistory({
+  store,
+  onBack,
+  onEditSession,
+  onStartPastRoutine,
+  onStartPastExtra,
+}: WorkoutHistoryProps) {
   const { getWorkoutHistory, getExtraSessions } = store;
   const [history, setHistory] = useState<WorkoutLog[]>([]);
   const [extras, setExtras] = useState<ExtraSessionRow[]>([]);
@@ -42,6 +54,10 @@ export function WorkoutHistory({ store, onBack, onEditSession }: WorkoutHistoryP
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [receiptLog, setReceiptLog] = useState<WorkoutLog | null>(null);
   const isMounted = useRef(true);
+
+  const [pastModal, setPastModal] = useState<null | "gym" | "extra">(null);
+  const [pastDate, setPastDate] = useState(() => localDateStr());
+  const [pastDayId, setPastDayId] = useState<string>("");
 
   useEffect(() => {
     isMounted.current = true;
@@ -151,6 +167,32 @@ export function WorkoutHistory({ store, onBack, onEditSession }: WorkoutHistoryP
     new Set([...Object.keys(groupedByDate), ...Object.keys(extrasByDate)])
   ).sort((a, b) => b.localeCompare(a));
 
+  const todayStr = localDateStr();
+  const firstDayId = store.routine[0]?.id ?? "";
+
+  const openGymModal = () => {
+    setPastDate(todayStr);
+    setPastDayId(firstDayId);
+    setPastModal("gym");
+  };
+
+  const openExtraModal = () => {
+    setPastDate(todayStr);
+    setPastModal("extra");
+  };
+
+  const handleConfirmPastGym = async () => {
+    if (!pastDayId || !pastDate) return;
+    setPastModal(null);
+    await onStartPastRoutine(pastDayId, pastDate);
+  };
+
+  const handleConfirmPastExtra = () => {
+    if (!pastDate) return;
+    setPastModal(null);
+    onStartPastExtra(pastDate);
+  };
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -186,6 +228,35 @@ export function WorkoutHistory({ store, onBack, onEditSession }: WorkoutHistoryP
             No se pudieron cargar las actividades extra: {extrasLoadError}
           </div>
         )}
+
+        <div className="mb-6 space-y-2">
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Agregar al pasado
+          </p>
+          <button
+            type="button"
+            onClick={openGymModal}
+            disabled={store.routine.length === 0}
+            className="flex w-full items-center justify-center gap-2 rounded-xl border border-border bg-card py-3 text-sm font-semibold text-foreground transition-colors hover:bg-secondary disabled:opacity-50"
+          >
+            <Plus className="h-4 w-4 text-primary" />
+            Entrenamiento de rutina (pesos, ejercicios)
+          </button>
+          <button
+            type="button"
+            onClick={openExtraModal}
+            className="flex w-full items-center justify-center gap-2 rounded-xl border border-border bg-card py-3 text-sm font-semibold text-foreground transition-colors hover:bg-secondary"
+          >
+            <Activity className="h-4 w-4 text-blue-400" />
+            Actividad extra (correr, caminar…)
+          </button>
+          {store.routine.length === 0 && (
+            <p className="text-xs text-muted-foreground">
+              Primero tenes que tener una rutina en Inicio para registrar un gym pasado.
+            </p>
+          )}
+        </div>
+
         {loading ? (
           <div className="flex items-center justify-center py-16">
             <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
@@ -391,6 +462,106 @@ export function WorkoutHistory({ store, onBack, onEditSession }: WorkoutHistoryP
           />
         )}
       </AnimatePresence>
+
+      {/* Modales: registrar sesión pasada */}
+      {pastModal === "gym" && (
+        <div className="fixed inset-0 z-[100] flex items-end justify-center bg-black/50 p-4 sm:items-center">
+          <div
+            role="dialog"
+            className="w-full max-w-md rounded-2xl border border-border bg-card p-5 shadow-xl"
+          >
+            <h2 className="text-lg font-bold text-foreground">
+              Entrenamiento de rutina
+            </h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Elegí el día y la fecha. Vas a ver la misma pantalla que al entrenar, para cargar pesos y series.
+            </p>
+            <label className="mt-4 block text-xs font-medium text-muted-foreground">
+              Fecha
+            </label>
+            <input
+              type="date"
+              max={todayStr}
+              value={pastDate}
+              onChange={(e) => setPastDate(e.target.value)}
+              className="mt-1 w-full rounded-xl bg-secondary px-4 py-3 text-foreground"
+            />
+            <label className="mt-3 block text-xs font-medium text-muted-foreground">
+              Día de la rutina
+            </label>
+            <select
+              value={pastDayId}
+              onChange={(e) => setPastDayId(e.target.value)}
+              className="mt-1 w-full rounded-xl bg-secondary px-4 py-3 text-foreground"
+            >
+              {store.routine.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.emoji} {d.name}
+                </option>
+              ))}
+            </select>
+            <div className="mt-5 flex gap-2">
+              <button
+                type="button"
+                onClick={() => setPastModal(null)}
+                className="flex-1 rounded-xl bg-secondary py-3 text-sm font-semibold text-foreground"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleConfirmPastGym()}
+                disabled={!pastDayId}
+                className="flex-1 rounded-xl bg-primary py-3 text-sm font-bold text-primary-foreground disabled:opacity-50"
+              >
+                Continuar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pastModal === "extra" && (
+        <div className="fixed inset-0 z-[100] flex items-end justify-center bg-black/50 p-4 sm:items-center">
+          <div
+            role="dialog"
+            className="w-full max-w-md rounded-2xl border border-border bg-card p-5 shadow-xl"
+          >
+            <h2 className="text-lg font-bold text-foreground">
+              Actividad extra
+            </h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Elegí la fecha y luego completá tipo de actividad, duración, etc.
+            </p>
+            <label className="mt-4 block text-xs font-medium text-muted-foreground">
+              Fecha
+            </label>
+            <input
+              type="date"
+              max={todayStr}
+              value={pastDate}
+              onChange={(e) => setPastDate(e.target.value)}
+              className="mt-1 w-full rounded-xl bg-secondary px-4 py-3 text-foreground"
+            />
+            <div className="mt-5 flex gap-2">
+              <button
+                type="button"
+                onClick={() => setPastModal(null)}
+                className="flex-1 rounded-xl bg-secondary py-3 text-sm font-semibold text-foreground"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmPastExtra}
+                className="flex-1 rounded-xl bg-primary py-3 text-sm font-bold text-primary-foreground"
+              >
+                Continuar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </motion.div>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import {
   ArrowLeft,
@@ -30,9 +30,15 @@ const ACTIVITY_SUGGESTIONS = [
 interface ExtraSessionFormProps {
   onBack: () => void;
   onSaved: () => void;
+  /** Fecha inicial (ej. registro retroactivo desde historial) */
+  initialDate?: string;
 }
 
-export function ExtraSessionForm({ onBack, onSaved }: ExtraSessionFormProps) {
+export function ExtraSessionForm({
+  onBack,
+  onSaved,
+  initialDate,
+}: ExtraSessionFormProps) {
   const { user } = useAuth();
   const supabase = createClient();
 
@@ -42,7 +48,13 @@ export function ExtraSessionForm({ onBack, onSaved }: ExtraSessionFormProps) {
   const [notes, setNotes] = useState("");
   const [steps, setSteps] = useState("");
   const [distance, setDistance] = useState("");
-  const [date, setDate] = useState(() => localDateStr());
+  const [date, setDate] = useState(
+    () => initialDate ?? localDateStr()
+  );
+
+  useEffect(() => {
+    if (initialDate) setDate(initialDate);
+  }, [initialDate]);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState("");
