@@ -154,15 +154,29 @@ export function UserProfileScreen({ onBack }: UserProfileScreenProps) {
     };
     if (!result?.ok) {
       const err = result?.error;
-      if (err === "invalid_credentials") {
-        setLinkError("Usuario o codigo incorrectos. Pedile a tu profesor el usuario y el codigo desde su perfil.");
-      } else if (err === "only_students") {
-        setLinkError(
-          "Tu cuenta no esta como alumno en la base. En Supabase: Table Editor > profiles > tu fila > role = student"
-        );
-      } else {
-        setLinkError("No se pudo vincular. Intenta de nuevo.");
-      }
+      const hints: Record<string, string> = {
+        invalid_credentials:
+          "Usuario o codigo incorrectos. Revisa usuario/email del profesor y el codigo guardado en su perfil.",
+        professor_email_not_found:
+          "No hay una cuenta con ese email/usuario. Tiene que ser igual al login del profesor (ej. sofitesta o su Gmail).",
+        professor_no_profile:
+          "El profesor no tiene fila en perfiles. Que inicie sesion una vez en MOV.",
+        not_a_professor:
+          "Esa cuenta no esta como profesor (role en Supabase profiles).",
+        professor_code_not_set:
+          "El profesor tiene que abrir Mi perfil, poner el codigo y tocar Guardar codigo.",
+        wrong_code: "El codigo no coincide. Tiene que ser exactamente el que guardo el profesor.",
+        cannot_link_self: "No podes vincularte a vos mismo.",
+        update_failed:
+          "No se pudo guardar el vinculo. Ejecuta en Supabase el SQL schema-v3.4-link-rls-fix.sql",
+        only_students:
+          "Tu cuenta no esta como alumno. En Supabase: profiles > tu usuario > role = student",
+      };
+      setLinkError(
+        err && hints[err]
+          ? hints[err]
+          : `No se pudo vincular${err ? ` (${err})` : ""}.`
+      );
       return;
     }
     if (result.professor_id) {
