@@ -101,3 +101,5 @@ create index if not exists idx_workout_logs_user_date
 
 create index if not exists idx_workout_logs_user_day
   on public.workout_logs (user_id, day_id, date desc);
+
+-- Migraciones adicionales: ejecutar tambien schema-v2.sql y schema-v3.sql en el SQL Editor.

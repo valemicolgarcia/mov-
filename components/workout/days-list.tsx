@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Dumbbell, Zap, Settings, LogOut, History, Plus } from "lucide-react";
+import { Dumbbell, Zap, Settings, LogOut, History, Plus, User } from "lucide-react";
 import type { WorkoutDay } from "@/lib/workout-data";
 import { DayCard } from "./day-card";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -13,6 +13,7 @@ interface DaysListProps {
   onEditRoutine: () => void;
   onViewHistory: () => void;
   onAddExtra: () => void;
+  onOpenProfile: () => void;
   onSignOut: () => Promise<void>;
 }
 
@@ -23,6 +24,7 @@ export function DaysList({
   onEditRoutine,
   onViewHistory,
   onAddExtra,
+  onOpenProfile,
   onSignOut,
 }: DaysListProps) {
   const currentDate = new Date();
@@ -62,6 +64,13 @@ export function DaysList({
               </p>
             </div>
             <ThemeToggle />
+            <button
+              onClick={onOpenProfile}
+              className="flex h-10 w-10 items-center justify-center rounded-xl bg-secondary text-muted-foreground transition-colors hover:text-foreground active:scale-95"
+              title="Mi perfil"
+            >
+              <User className="h-5 w-5" />
+            </button>
             <button
               onClick={onAddExtra}
               className="flex h-10 w-10 items-center justify-center rounded-xl bg-secondary text-muted-foreground transition-colors hover:text-foreground active:scale-95"

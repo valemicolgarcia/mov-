@@ -14,9 +14,16 @@ import { useWorkoutStore } from "@/lib/store";
 import { useAuth } from "@/lib/auth-context";
 import type { StudentSummary } from "@/lib/professor-store";
 import { Loader2 } from "lucide-react";
+import { UserProfileScreen } from "@/components/profile/user-profile-screen";
 
-type StudentView = "list" | "detail" | "editor" | "history" | "extra";
-type ProfessorView = "dashboard" | "student-detail";
+type StudentView =
+  | "list"
+  | "detail"
+  | "editor"
+  | "history"
+  | "extra"
+  | "profile";
+type ProfessorView = "dashboard" | "student-detail" | "profile";
 
 export default function Home() {
   const { user, profile, loading: authLoading, signOut } = useAuth();
@@ -53,7 +60,12 @@ export default function Home() {
     return (
       <main className="min-h-screen bg-background">
         <AnimatePresence mode="wait">
-          {professorView === "student-detail" && selectedStudent ? (
+          {professorView === "profile" ? (
+            <UserProfileScreen
+              key="profile"
+              onBack={() => setProfessorView("dashboard")}
+            />
+          ) : professorView === "student-detail" && selectedStudent ? (
             <StudentDetail
               key="student-detail"
               student={selectedStudent}
@@ -70,6 +82,7 @@ export default function Home() {
                 setSelectedStudent(s);
                 setProfessorView("student-detail");
               }}
+              onOpenProfile={() => setProfessorView("profile")}
               onSignOut={signOut}
             />
           )}
@@ -132,6 +145,11 @@ export default function Home() {
             onBack={() => setStudentView("list")}
             onSaved={() => setStudentView("list")}
           />
+        ) : studentView === "profile" ? (
+          <UserProfileScreen
+            key="profile"
+            onBack={() => setStudentView("list")}
+          />
         ) : studentView === "detail" && selectedDay ? (
           <WorkoutDetail
             key={`detail-${store.editingDate || "today"}`}
@@ -151,6 +169,7 @@ export default function Home() {
             onEditRoutine={() => setStudentView("editor")}
             onViewHistory={() => setStudentView("history")}
             onAddExtra={() => setStudentView("extra")}
+            onOpenProfile={() => setStudentView("profile")}
             onSignOut={signOut}
           />
         )}

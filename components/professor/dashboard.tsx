@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Dumbbell, LogOut, Users, Loader2 } from "lucide-react";
+import { Dumbbell, LogOut, Users, Loader2, User } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { useProfessorStore, type StudentSummary } from "@/lib/professor-store";
 import { StudentCard } from "./student-card";
@@ -9,12 +9,14 @@ import { StudentCard } from "./student-card";
 interface ProfessorDashboardProps {
   professorName: string;
   onSelectStudent: (student: StudentSummary) => void;
+  onOpenProfile: () => void;
   onSignOut: () => Promise<void>;
 }
 
 export function ProfessorDashboard({
   professorName,
   onSelectStudent,
+  onOpenProfile,
   onSignOut,
 }: ProfessorDashboardProps) {
   const { students, loading } = useProfessorStore();
@@ -47,6 +49,13 @@ export function ProfessorDashboard({
               </p>
             </div>
             <ThemeToggle />
+            <button
+              onClick={onOpenProfile}
+              className="flex h-10 w-10 items-center justify-center rounded-xl bg-secondary text-muted-foreground transition-colors hover:text-foreground active:scale-95"
+              title="Mi perfil"
+            >
+              <User className="h-5 w-5" />
+            </button>
             <button
               onClick={onSignOut}
               className="flex h-10 w-10 items-center justify-center rounded-xl bg-secondary text-muted-foreground transition-colors hover:text-foreground active:scale-95"

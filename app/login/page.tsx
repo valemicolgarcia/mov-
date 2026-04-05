@@ -31,8 +31,19 @@ export default function LoginPage() {
   const [professorEmail, setProfessorEmail] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [registeredHint, setRegisteredHint] = useState(false);
   const router = useRouter();
   const supabase = createClient();
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const sp = new URLSearchParams(window.location.search);
+    if (sp.get("registered") === "1") {
+      setMode("login");
+      setRegisteredHint(true);
+      router.replace("/login", { scroll: false });
+    }
+  }, [router]);
 
   useEffect(() => {
     if (!authLoading && user) {
@@ -81,6 +92,12 @@ export default function LoginPage() {
           options: { data: metadata },
         });
         if (error) throw error;
+        await supabase.auth.signOut();
+        setMode("login");
+        setRegisteredHint(true);
+        setPassword("");
+        router.replace("/login");
+        return;
       } else {
         const { error } = await supabase.auth.signInWithPassword({
           email: authEmail,
@@ -123,6 +140,16 @@ export default function LoginPage() {
             </p>
           </div>
         </div>
+
+        {registeredHint && mode === "login" && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-4 rounded-xl border border-primary/30 bg-primary/10 px-4 py-3 text-sm text-foreground"
+          >
+            Cuenta creada. Inicia sesion con tu usuario y contrasena.
+          </motion.div>
+        )}
 
         {/* Tabs */}
         <div className="mb-6 flex rounded-xl bg-secondary p-1">
