@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import {
@@ -21,6 +21,8 @@ export function useWorkoutStore() {
   const [routine, setRoutine] = useState<WorkoutDay[]>([]);
   const [todayLogs, setTodayLogs] = useState<Record<string, WorkoutLog>>({});
   const [loading, setLoading] = useState(true);
+  const [editingDate, setEditingDate] = useState<string | null>(null);
+  const savedTodayLogs = useRef<Record<string, WorkoutLog>>({});
 
   // Load routine from Supabase
   const loadRoutine = useCallback(async () => {
@@ -104,7 +106,7 @@ export function useWorkoutStore() {
       reps: number
     ) => {
       if (!user) return;
-      const date = todayStr();
+      const date = editingDate || todayStr();
       const existing = todayLogs[dayId];
       const exercises = existing?.exercises
         ? { ...existing.exercises }
@@ -122,7 +124,7 @@ export function useWorkoutStore() {
         day_id: dayId,
         date,
         exercises,
-        completed: false,
+        completed: existing?.completed ?? false,
       };
 
       const { data } = await supabase
@@ -145,14 +147,14 @@ export function useWorkoutStore() {
         }));
       }
     },
-    [user, supabase, todayLogs]
+    [user, supabase, todayLogs, editingDate]
   );
 
   // Mark a checklist/timer exercise as complete
   const markExerciseComplete = useCallback(
     async (dayId: string, exerciseId: string, completed: boolean, setIndex = 0) => {
       if (!user) return;
-      const date = todayStr();
+      const date = editingDate || todayStr();
       const existing = todayLogs[dayId];
       const exercises = existing?.exercises
         ? { ...existing.exercises }
@@ -170,7 +172,7 @@ export function useWorkoutStore() {
         day_id: dayId,
         date,
         exercises,
-        completed: false,
+        completed: existing?.completed ?? false,
       };
 
       const { data } = await supabase
@@ -193,14 +195,14 @@ export function useWorkoutStore() {
         }));
       }
     },
-    [user, supabase, todayLogs]
+    [user, supabase, todayLogs, editingDate]
   );
 
   // Finish workout for a day
   const finishWorkout = useCallback(
     async (dayId: string) => {
       if (!user) return;
-      const date = todayStr();
+      const date = editingDate || todayStr();
       const existing = todayLogs[dayId];
       if (!existing) return;
 
@@ -216,7 +218,7 @@ export function useWorkoutStore() {
         [dayId]: { ...prev[dayId], completed: true },
       }));
     },
-    [user, supabase, todayLogs]
+    [user, supabase, todayLogs, editingDate]
   );
 
   // Get exercise history (last N sessions)
@@ -319,6 +321,48 @@ export function useWorkoutStore() {
     [user, supabase]
   );
 
+  // Enter history editing mode: loads a past date's log into todayLogs
+  const startEditingHistory = useCallback(
+    async (dayId: string, date: string) => {
+      if (!user) return;
+      savedTodayLogs.current = todayLogs;
+
+      const { data } = await supabase
+        .from("workout_logs")
+        .select("*")
+        .eq("user_id", user.id)
+        .eq("day_id", dayId)
+        .eq("date", date)
+        .single();
+
+      if (data) {
+        setTodayLogs({
+          [dayId]: {
+            id: data.id,
+            user_id: data.user_id,
+            day_id: data.day_id,
+            date: data.date,
+            exercises: data.exercises as Record<string, SetLog[]>,
+            completed: data.completed,
+          },
+        });
+      } else {
+        setTodayLogs({});
+      }
+
+      setEditingDate(date);
+    },
+    [user, supabase, todayLogs]
+  );
+
+  // Exit history editing mode: restore today's actual logs
+  const stopEditingHistory = useCallback(async () => {
+    setEditingDate(null);
+    setTodayLogs(savedTodayLogs.current);
+    savedTodayLogs.current = {};
+    await loadTodayLogs();
+  }, [loadTodayLogs]);
+
   // Update a specific exercise's sets in a past workout log
   const updateHistoryLog = useCallback(
     async (
@@ -390,6 +434,7 @@ export function useWorkoutStore() {
     routine,
     loading,
     todayLogs,
+    editingDate,
     saveRoutine,
     logSet,
     markExerciseComplete,
@@ -398,6 +443,8 @@ export function useWorkoutStore() {
     getLastSession,
     getWorkoutHistory,
     getDayProgress,
+    startEditingHistory,
+    stopEditingHistory,
     updateHistoryLog,
     importRoutine,
     exportRoutine,

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowLeft, Clock, Flame, Check } from "lucide-react";
+import { ArrowLeft, Clock, Flame, Check, Calendar } from "lucide-react";
 import type { WorkoutDay } from "@/lib/workout-data";
 import type { useWorkoutStore } from "@/lib/store";
 import { BlockCard } from "./block-card";
@@ -16,6 +16,7 @@ interface WorkoutDetailProps {
 
 export function WorkoutDetail({ day, store, onBack }: WorkoutDetailProps) {
   const [showReceipt, setShowReceipt] = useState(false);
+  const isEditingHistory = !!store.editingDate;
 
   const totalExercises = day.blocks.reduce(
     (acc, block) => acc + block.exercises.length,
@@ -25,6 +26,15 @@ export function WorkoutDetail({ day, store, onBack }: WorkoutDetailProps) {
   const progress = store.getDayProgress(day.id);
   const dayLog = store.todayLogs[day.id];
   const isCompleted = dayLog?.completed ?? false;
+
+  const formatEditDate = (dateStr: string) => {
+    const d = new Date(dateStr + "T12:00:00");
+    return d.toLocaleDateString("es-AR", {
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+    });
+  };
 
   const handleFinish = async () => {
     await store.finishWorkout(day.id);
@@ -105,6 +115,18 @@ export function WorkoutDetail({ day, store, onBack }: WorkoutDetailProps) {
         </div>
       </div>
 
+      {/* Editing history banner */}
+      {isEditingHistory && store.editingDate && (
+        <div className="border-b border-orange-500/30 bg-orange-500/10">
+          <div className="mx-auto flex max-w-lg items-center gap-2 px-4 py-2.5">
+            <Calendar className="h-4 w-4 text-orange-400" />
+            <span className="text-sm font-medium text-orange-400">
+              Editando sesión del {formatEditDate(store.editingDate)}
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Blocks */}
       <div className="mx-auto max-w-lg px-4 py-6">
         <div className="space-y-4">
@@ -119,21 +141,34 @@ export function WorkoutDetail({ day, store, onBack }: WorkoutDetailProps) {
           ))}
         </div>
 
-        {/* Finish button */}
-        <motion.button
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.5 }}
-          onClick={isCompleted ? handleViewReceipt : handleFinish}
-          className={`mt-8 flex w-full items-center justify-center gap-2 rounded-2xl py-4 text-lg font-bold transition-transform active:scale-[0.98] ${
-            isCompleted
-              ? "bg-primary/20 text-primary"
-              : "bg-primary text-primary-foreground"
-          }`}
-        >
-          <Check className="h-5 w-5" />
-          {isCompleted ? "Ver Comprobante" : "Finalizar Entrenamiento"}
-        </motion.button>
+        {/* Finish / Save button */}
+        {isEditingHistory ? (
+          <motion.button
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.5 }}
+            onClick={onBack}
+            className="mt-8 flex w-full items-center justify-center gap-2 rounded-2xl bg-orange-500 py-4 text-lg font-bold text-white transition-transform active:scale-[0.98]"
+          >
+            <Check className="h-5 w-5" />
+            Guardar y volver
+          </motion.button>
+        ) : (
+          <motion.button
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.5 }}
+            onClick={isCompleted ? handleViewReceipt : handleFinish}
+            className={`mt-8 flex w-full items-center justify-center gap-2 rounded-2xl py-4 text-lg font-bold transition-transform active:scale-[0.98] ${
+              isCompleted
+                ? "bg-primary/20 text-primary"
+                : "bg-primary text-primary-foreground"
+            }`}
+          >
+            <Check className="h-5 w-5" />
+            {isCompleted ? "Ver Comprobante" : "Finalizar Entrenamiento"}
+          </motion.button>
+        )}
       </div>
 
       <div className="h-20" />

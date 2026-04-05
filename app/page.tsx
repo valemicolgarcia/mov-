@@ -38,6 +38,23 @@ export default function Home() {
     );
   }
 
+  const handleEditSession = async (dayId: string, date: string) => {
+    await store.startEditingHistory(dayId, date);
+    setSelectedDayId(dayId);
+    setView("detail");
+  };
+
+  const handleBackFromDetail = async () => {
+    if (store.editingDate) {
+      await store.stopEditingHistory();
+      setSelectedDayId(null);
+      setView("history");
+    } else {
+      setSelectedDayId(null);
+      setView("list");
+    }
+  };
+
   return (
     <main className="min-h-screen bg-background">
       <AnimatePresence mode="wait">
@@ -58,16 +75,14 @@ export default function Home() {
             key="history"
             store={store}
             onBack={() => setView("list")}
+            onEditSession={handleEditSession}
           />
         ) : view === "detail" && selectedDay ? (
           <WorkoutDetail
-            key="detail"
+            key={`detail-${store.editingDate || "today"}`}
             day={selectedDay}
             store={store}
-            onBack={() => {
-              setSelectedDayId(null);
-              setView("list");
-            }}
+            onBack={handleBackFromDetail}
           />
         ) : (
           <DaysList

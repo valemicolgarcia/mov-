@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowLeft,
@@ -9,10 +9,6 @@ import {
   Dumbbell,
   CheckCircle2,
   Pencil,
-  Check,
-  X,
-  Minus,
-  Plus,
   Download,
 } from "lucide-react";
 import type { WorkoutDay, WorkoutLog, SetLog } from "@/lib/workout-data";
@@ -22,34 +18,19 @@ import { WorkoutReceipt } from "./workout-receipt";
 interface WorkoutHistoryProps {
   store: ReturnType<typeof useWorkoutStore>;
   onBack: () => void;
+  onEditSession: (dayId: string, date: string) => void;
 }
 
-interface EditingSet {
-  exerciseId: string;
-  setIndex: number;
-  weight: string;
-  reps: string;
-}
-
-export function WorkoutHistory({ store, onBack }: WorkoutHistoryProps) {
+export function WorkoutHistory({ store, onBack, onEditSession }: WorkoutHistoryProps) {
   const [history, setHistory] = useState<WorkoutLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [editingLog, setEditingLog] = useState<string | null>(null);
-  const [editingSet, setEditingSet] = useState<EditingSet | null>(null);
-  const [saving, setSaving] = useState(false);
   const [receiptLog, setReceiptLog] = useState<WorkoutLog | null>(null);
 
   useEffect(() => {
     store.getWorkoutHistory(50).then((data) => {
       setHistory(data as WorkoutLog[]);
       setLoading(false);
-    });
-  }, [store]);
-
-  const reloadHistory = useCallback(() => {
-    store.getWorkoutHistory(50).then((data) => {
-      setHistory(data as WorkoutLog[]);
     });
   }, [store]);
 
@@ -76,16 +57,6 @@ export function WorkoutHistory({ store, onBack }: WorkoutHistoryProps) {
     return exerciseId;
   };
 
-  const getExerciseInfo = (dayId: string, exerciseId: string) => {
-    const day = getDayInfo(dayId);
-    if (!day) return null;
-    for (const block of day.blocks) {
-      const ex = block.exercises.find((e) => e.id === exerciseId);
-      if (ex) return ex;
-    }
-    return null;
-  };
-
   const countCompletedExercises = (
     exercises: Record<string, SetLog[]>
   ): number => {
@@ -94,74 +65,6 @@ export function WorkoutHistory({ store, onBack }: WorkoutHistoryProps) {
       if (sets.some((s) => s?.completed)) count++;
     }
     return count;
-  };
-
-  const handleStartEdit = (logKey: string) => {
-    setEditingLog(logKey);
-    setEditingSet(null);
-  };
-
-  const handleCancelEdit = () => {
-    setEditingLog(null);
-    setEditingSet(null);
-  };
-
-  const handleEditSet = (
-    exerciseId: string,
-    setIndex: number,
-    set: SetLog
-  ) => {
-    setEditingSet({
-      exerciseId,
-      setIndex,
-      weight: set.weight.toString(),
-      reps: set.reps.toString(),
-    });
-  };
-
-  const handleSaveSet = async (dayId: string, date: string) => {
-    if (!editingSet) return;
-    setSaving(true);
-
-    const weight = parseFloat(editingSet.weight) || 0;
-    const reps = parseInt(editingSet.reps) || 0;
-
-    await store.updateHistoryLog(
-      dayId,
-      date,
-      editingSet.exerciseId,
-      editingSet.setIndex,
-      weight,
-      reps
-    );
-
-    setHistory((prev) =>
-      prev.map((log) => {
-        if (log.day_id === dayId && log.date === date) {
-          const exercises = { ...log.exercises };
-          if (!exercises[editingSet.exerciseId])
-            exercises[editingSet.exerciseId] = [];
-          const sets = [...exercises[editingSet.exerciseId]];
-          sets[editingSet.setIndex] = { weight, reps, completed: true };
-          exercises[editingSet.exerciseId] = sets;
-          return { ...log, exercises };
-        }
-        return log;
-      })
-    );
-
-    setEditingSet(null);
-    setSaving(false);
-  };
-
-  const adjustEditValue = (
-    field: "weight" | "reps",
-    delta: number
-  ) => {
-    if (!editingSet) return;
-    const current = parseFloat(editingSet[field]) || 0;
-    const newVal = Math.max(0, current + delta);
-    setEditingSet({ ...editingSet, [field]: newVal.toString() });
   };
 
   const groupedByDate: Record<string, WorkoutLog[]> = {};
@@ -227,7 +130,6 @@ export function WorkoutHistory({ store, onBack }: WorkoutHistoryProps) {
                     const dayInfo = getDayInfo(log.day_id);
                     const logKey = `${log.day_id}-${log.date}`;
                     const isExpanded = expandedId === logKey;
-                    const isEditing = editingLog === logKey;
 
                     return (
                       <div
@@ -272,46 +174,32 @@ export function WorkoutHistory({ store, onBack }: WorkoutHistoryProps) {
                               className="overflow-hidden"
                             >
                               <div className="border-t border-border px-4 py-3">
-                                {/* Edit/Receipt buttons */}
+                                {/* Action buttons */}
                                 <div className="mb-3 flex items-center gap-2">
-                                  {isEditing ? (
+                                  <button
+                                    onClick={() =>
+                                      onEditSession(log.day_id, log.date)
+                                    }
+                                    className="flex items-center gap-1.5 rounded-lg bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary active:scale-95"
+                                  >
+                                    <Pencil className="h-3 w-3" />
+                                    Editar
+                                  </button>
+                                  {dayInfo && (
                                     <button
-                                      onClick={handleCancelEdit}
+                                      onClick={() => setReceiptLog(log)}
                                       className="flex items-center gap-1.5 rounded-lg bg-secondary px-3 py-1.5 text-xs font-medium text-foreground active:scale-95"
                                     >
-                                      <X className="h-3 w-3" />
-                                      Cancelar edición
+                                      <Download className="h-3 w-3" />
+                                      Comprobante
                                     </button>
-                                  ) : (
-                                    <>
-                                      <button
-                                        onClick={() => handleStartEdit(logKey)}
-                                        className="flex items-center gap-1.5 rounded-lg bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary active:scale-95"
-                                      >
-                                        <Pencil className="h-3 w-3" />
-                                        Editar
-                                      </button>
-                                      {dayInfo && (
-                                        <button
-                                          onClick={() => setReceiptLog(log)}
-                                          className="flex items-center gap-1.5 rounded-lg bg-secondary px-3 py-1.5 text-xs font-medium text-foreground active:scale-95"
-                                        >
-                                          <Download className="h-3 w-3" />
-                                          Comprobante
-                                        </button>
-                                      )}
-                                    </>
                                   )}
                                 </div>
 
-                                {/* Exercises */}
+                                {/* Exercises summary */}
                                 <div className="space-y-2">
                                   {Object.entries(log.exercises).map(
                                     ([exId, sets]) => {
-                                      const exInfo = getExerciseInfo(
-                                        log.day_id,
-                                        exId
-                                      );
                                       const hasWeights = sets.some(
                                         (s) => s?.weight > 0
                                       );
@@ -327,154 +215,15 @@ export function WorkoutHistory({ store, onBack }: WorkoutHistoryProps) {
                                           {hasWeights ? (
                                             <div className="mt-1.5 flex flex-wrap gap-1.5">
                                               {sets
-                                                .map((set, i) => ({
-                                                  set,
-                                                  originalIndex: i,
-                                                }))
-                                                .filter(
-                                                  ({ set }) => set?.completed
-                                                )
-                                                .map(
-                                                  ({ set, originalIndex }) => {
-                                                    const isEditingThis =
-                                                      isEditing &&
-                                                      editingSet?.exerciseId ===
-                                                        exId &&
-                                                      editingSet?.setIndex ===
-                                                        originalIndex;
-
-                                                    if (isEditingThis) {
-                                                      return (
-                                                        <div
-                                                          key={originalIndex}
-                                                          className="flex items-center gap-1 rounded-lg border border-primary bg-background p-1.5"
-                                                        >
-                                                          {/* Weight */}
-                                                          <button
-                                                            onClick={() =>
-                                                              adjustEditValue(
-                                                                "weight",
-                                                                -2.5
-                                                              )
-                                                            }
-                                                            className="flex h-7 w-7 items-center justify-center rounded bg-secondary text-muted-foreground active:scale-95"
-                                                          >
-                                                            <Minus className="h-3 w-3" />
-                                                          </button>
-                                                          <input
-                                                            type="number"
-                                                            inputMode="decimal"
-                                                            value={
-                                                              editingSet!.weight
-                                                            }
-                                                            onChange={(e) =>
-                                                              setEditingSet({
-                                                                ...editingSet!,
-                                                                weight:
-                                                                  e.target
-                                                                    .value,
-                                                              })
-                                                            }
-                                                            className="h-7 w-12 rounded bg-secondary px-1 text-center text-xs font-bold tabular-nums text-foreground focus:outline-none"
-                                                          />
-                                                          <button
-                                                            onClick={() =>
-                                                              adjustEditValue(
-                                                                "weight",
-                                                                2.5
-                                                              )
-                                                            }
-                                                            className="flex h-7 w-7 items-center justify-center rounded bg-secondary text-muted-foreground active:scale-95"
-                                                          >
-                                                            <Plus className="h-3 w-3" />
-                                                          </button>
-
-                                                          <span className="text-xs text-muted-foreground">
-                                                            ×
-                                                          </span>
-
-                                                          {/* Reps */}
-                                                          <button
-                                                            onClick={() =>
-                                                              adjustEditValue(
-                                                                "reps",
-                                                                -1
-                                                              )
-                                                            }
-                                                            className="flex h-7 w-7 items-center justify-center rounded bg-secondary text-muted-foreground active:scale-95"
-                                                          >
-                                                            <Minus className="h-3 w-3" />
-                                                          </button>
-                                                          <input
-                                                            type="number"
-                                                            inputMode="numeric"
-                                                            value={
-                                                              editingSet!.reps
-                                                            }
-                                                            onChange={(e) =>
-                                                              setEditingSet({
-                                                                ...editingSet!,
-                                                                reps: e.target
-                                                                  .value,
-                                                              })
-                                                            }
-                                                            className="h-7 w-10 rounded bg-secondary px-1 text-center text-xs font-bold tabular-nums text-foreground focus:outline-none"
-                                                          />
-                                                          <button
-                                                            onClick={() =>
-                                                              adjustEditValue(
-                                                                "reps",
-                                                                1
-                                                              )
-                                                            }
-                                                            className="flex h-7 w-7 items-center justify-center rounded bg-secondary text-muted-foreground active:scale-95"
-                                                          >
-                                                            <Plus className="h-3 w-3" />
-                                                          </button>
-
-                                                          {/* Save */}
-                                                          <button
-                                                            onClick={() =>
-                                                              handleSaveSet(
-                                                                log.day_id,
-                                                                log.date
-                                                              )
-                                                            }
-                                                            disabled={saving}
-                                                            className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary text-primary-foreground active:scale-95 disabled:opacity-50"
-                                                          >
-                                                            <Check className="h-3.5 w-3.5" />
-                                                          </button>
-                                                        </div>
-                                                      );
-                                                    }
-
-                                                    return (
-                                                      <button
-                                                        key={originalIndex}
-                                                        onClick={() =>
-                                                          isEditing &&
-                                                          handleEditSet(
-                                                            exId,
-                                                            originalIndex,
-                                                            set
-                                                          )
-                                                        }
-                                                        className={`rounded-md px-2.5 py-1 text-xs font-medium transition-all ${
-                                                          isEditing
-                                                            ? "bg-primary/10 text-primary border border-primary/30 active:scale-95 cursor-pointer"
-                                                            : "bg-background text-foreground cursor-default"
-                                                        }`}
-                                                      >
-                                                        {set.weight}kg ×{" "}
-                                                        {set.reps}
-                                                        {isEditing && (
-                                                          <Pencil className="ml-1 inline h-2.5 w-2.5" />
-                                                        )}
-                                                      </button>
-                                                    );
-                                                  }
-                                                )}
+                                                .filter((s) => s?.completed)
+                                                .map((set, i) => (
+                                                  <span
+                                                    key={i}
+                                                    className="rounded-md bg-background px-2.5 py-1 text-xs font-medium text-foreground"
+                                                  >
+                                                    {set.weight}kg × {set.reps}
+                                                  </span>
+                                                ))}
                                             </div>
                                           ) : (
                                             <p className="mt-1 text-xs text-primary">
@@ -502,7 +251,7 @@ export function WorkoutHistory({ store, onBack }: WorkoutHistoryProps) {
 
       <div className="h-20" />
 
-      {/* Receipt modal from history */}
+      {/* Receipt modal */}
       <AnimatePresence>
         {receiptLog && getDayInfo(receiptLog.day_id) && (
           <WorkoutReceipt
