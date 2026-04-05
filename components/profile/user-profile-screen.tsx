@@ -28,6 +28,7 @@ export function UserProfileScreen({ onBack }: UserProfileScreenProps) {
   const [shareCode, setShareCode] = useState("");
   const [savingCode, setSavingCode] = useState(false);
   const [codeSaved, setCodeSaved] = useState(false);
+  const [shareCodeError, setShareCodeError] = useState("");
 
   const [profIdentifier, setProfIdentifier] = useState("");
   const [profCode, setProfCode] = useState("");
@@ -69,15 +70,57 @@ export function UserProfileScreen({ onBack }: UserProfileScreenProps) {
     if (!user || profile?.role !== "professor") return;
     setSavingCode(true);
     setCodeSaved(false);
+    setShareCodeError("");
     const trimmed = shareCode.trim();
-    await supabase
+
+    const { data: rows, error: updErr } = await supabase
       .from("profiles")
       .update({ share_code: trimmed || null })
-      .eq("id", user.id);
+      .eq("id", user.id)
+      .select("share_code");
+
+    let saved = false;
+    if (!updErr && rows && rows.length > 0) {
+      saved = true;
+      setShareCode(rows[0].share_code ?? "");
+    } else {
+      const { data: rpcData, error: rpcErr } = await supabase.rpc(
+        "set_my_share_code",
+        { p_code: trimmed }
+      );
+      const rpc = rpcData as { ok?: boolean; error?: string } | null;
+      if (!rpcErr && rpc?.ok) {
+        saved = true;
+        setShareCode(trimmed);
+      } else if (updErr) {
+        const msg = updErr.message;
+        setShareCodeError(
+          msg.includes("share_code") || msg.toLowerCase().includes("column")
+            ? "En Supabase falta la columna share_code. Ejecuta supabase/schema-v3.sql en el SQL Editor."
+            : msg
+        );
+      } else if (rpcErr) {
+        setShareCodeError(
+          rpcErr.message.includes("function") || rpcErr.code === "PGRST202"
+            ? "Ejecuta tambien supabase/schema-v3.2-share-code-rpc.sql en Supabase, o revisa el error: " +
+                rpcErr.message
+            : rpcErr.message
+        );
+      } else if (rpc?.error === "no_profile_row") {
+        setShareCodeError("No se encontro tu perfil en la base de datos.");
+      } else {
+        setShareCodeError(
+          "No se pudo guardar. Revisa que exista la columna share_code (schema-v3.sql)."
+        );
+      }
+    }
+
     await refreshProfile();
     setSavingCode(false);
-    setCodeSaved(true);
-    setTimeout(() => setCodeSaved(false), 2000);
+    if (saved) {
+      setCodeSaved(true);
+      setTimeout(() => setCodeSaved(false), 2000);
+    }
   };
 
   const handleLinkProfessor = async () => {
@@ -229,6 +272,9 @@ export function UserProfileScreen({ onBack }: UserProfileScreenProps) {
               placeholder="Ej: MOV2026"
               className="mb-3 w-full rounded-xl bg-secondary px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
             />
+            {shareCodeError && (
+              <p className="mb-2 text-xs text-destructive">{shareCodeError}</p>
+            )}
             <button
               type="button"
               onClick={handleSaveShareCode}
