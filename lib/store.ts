@@ -364,6 +364,56 @@ export function useWorkoutStore() {
     [user, supabase]
   );
 
+  /** Elimina una fila de workout_logs (historial del alumno) */
+  const deleteWorkoutSession = useCallback(
+    async (log: { id?: string; day_id: string; date: string }) => {
+      if (!user) return { error: "No hay usuario" };
+      let error: { message: string } | null = null;
+      if (log.id) {
+        const r = await supabase
+          .from("workout_logs")
+          .delete()
+          .eq("id", log.id)
+          .eq("user_id", user.id);
+        error = r.error;
+      } else {
+        const r = await supabase
+          .from("workout_logs")
+          .delete()
+          .eq("user_id", user.id)
+          .eq("day_id", log.day_id)
+          .eq("date", log.date);
+        error = r.error;
+      }
+      if (error) {
+        console.error("[workout_logs] delete:", error.message);
+        return { error: error.message };
+      }
+      if (log.date === todayStr()) {
+        await loadTodayLogs();
+      }
+      return { error: null };
+    },
+    [user, supabase, loadTodayLogs]
+  );
+
+  const deleteExtraSession = useCallback(
+    async (sessionId: string) => {
+      if (!user) return { error: "No hay usuario" };
+      const { error } = await supabase
+        .from("extra_sessions")
+        .delete()
+        .eq("id", sessionId)
+        .eq("user_id", user.id);
+      if (error) {
+        console.error("[extra_sessions] delete:", error.message);
+        return { error: error.message };
+      }
+      return { error: null };
+    },
+    [user, supabase]
+  );
+
   // Get full workout history (all past sessions)
   const getWorkoutHistory = useCallback(
     async (limit = 30) => {
@@ -520,6 +570,8 @@ export function useWorkoutStore() {
     getLastSession,
     getWorkoutHistory,
     getExtraSessions,
+    deleteWorkoutSession,
+    deleteExtraSession,
     getDayProgress,
     startEditingHistory,
     stopEditingHistory,

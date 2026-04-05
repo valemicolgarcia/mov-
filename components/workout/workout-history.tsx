@@ -14,6 +14,8 @@ import {
   Clock,
   Footprints,
   Plus,
+  Trash2,
+  Loader2,
 } from "lucide-react";
 import type { WorkoutDay, WorkoutLog, SetLog } from "@/lib/workout-data";
 import type { useWorkoutStore } from "@/lib/store";
@@ -46,7 +48,12 @@ export function WorkoutHistory({
   onStartPastRoutine,
   onStartPastExtra,
 }: WorkoutHistoryProps) {
-  const { getWorkoutHistory, getExtraSessions } = store;
+  const {
+    getWorkoutHistory,
+    getExtraSessions,
+    deleteWorkoutSession,
+    deleteExtraSession,
+  } = store;
   const [history, setHistory] = useState<WorkoutLog[]>([]);
   const [extras, setExtras] = useState<ExtraSessionRow[]>([]);
   const [extrasLoadError, setExtrasLoadError] = useState<string | null>(null);
@@ -54,6 +61,8 @@ export function WorkoutHistory({
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [receiptLog, setReceiptLog] = useState<WorkoutLog | null>(null);
   const isMounted = useRef(true);
+
+  const [deletingKey, setDeletingKey] = useState<string | null>(null);
 
   const [pastModal, setPastModal] = useState<null | "gym" | "extra">(null);
   const [pastDate, setPastDate] = useState(() => localDateStr());
@@ -193,6 +202,44 @@ export function WorkoutHistory({
     onStartPastExtra(pastDate);
   };
 
+  const handleDeleteWorkout = async (log: WorkoutLog) => {
+    if (
+      !window.confirm(
+        "¿Eliminar esta sesión de entrenamiento? No se puede deshacer."
+      )
+    ) {
+      return;
+    }
+    const key = `w-${log.day_id}-${log.date}`;
+    setDeletingKey(key);
+    const { error } = await deleteWorkoutSession(log);
+    setDeletingKey(null);
+    if (error) {
+      window.alert(error);
+      return;
+    }
+    await loadHistory();
+  };
+
+  const handleDeleteExtra = async (id: string) => {
+    if (
+      !window.confirm(
+        "¿Eliminar esta actividad? No se puede deshacer."
+      )
+    ) {
+      return;
+    }
+    const key = `e-${id}`;
+    setDeletingKey(key);
+    const { error } = await deleteExtraSession(id);
+    setDeletingKey(null);
+    if (error) {
+      window.alert(error);
+      return;
+    }
+    await loadHistory();
+  };
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -288,39 +335,59 @@ export function WorkoutHistory({
                     const logKey = `${log.day_id}-${log.date}`;
                     const isExpanded = expandedId === logKey;
 
+                    const delKey = `w-${log.day_id}-${log.date}`;
                     return (
                       <div
                         key={logKey}
                         className="overflow-hidden rounded-2xl border border-border bg-card"
                       >
-                        <button
-                          onClick={() =>
-                            setExpandedId(isExpanded ? null : logKey)
-                          }
-                          className="flex w-full items-center gap-3 p-4 text-left"
-                        >
-                          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-xl">
-                            {dayInfo?.emoji || "🏋️"}
-                          </div>
-                          <div className="flex-1">
-                            <h3 className="text-sm font-bold text-foreground">
-                              {dayInfo?.name || log.day_id}
-                            </h3>
-                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                              <CheckCircle2 className="h-3 w-3 text-primary" />
-                              <span>
-                                {countCompletedExercises(log.exercises)}{" "}
-                                ejercicios
-                              </span>
-                            </div>
-                          </div>
-                          <motion.div
-                            animate={{ rotate: isExpanded ? 180 : 0 }}
-                            className="text-muted-foreground"
+                        <div className="flex items-stretch">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setExpandedId(isExpanded ? null : logKey)
+                            }
+                            className="flex min-w-0 flex-1 items-center gap-3 p-4 text-left"
                           >
-                            <ChevronDown className="h-4 w-4" />
-                          </motion.div>
-                        </button>
+                            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-xl">
+                              {dayInfo?.emoji || "🏋️"}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <h3 className="text-sm font-bold text-foreground">
+                                {dayInfo?.name || log.day_id}
+                              </h3>
+                              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                <CheckCircle2 className="h-3 w-3 text-primary" />
+                                <span>
+                                  {countCompletedExercises(log.exercises)}{" "}
+                                  ejercicios
+                                </span>
+                              </div>
+                            </div>
+                            <motion.div
+                              animate={{ rotate: isExpanded ? 180 : 0 }}
+                              className="shrink-0 text-muted-foreground"
+                            >
+                              <ChevronDown className="h-4 w-4" />
+                            </motion.div>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void handleDeleteWorkout(log);
+                            }}
+                            disabled={deletingKey === delKey}
+                            title="Eliminar sesión"
+                            className="shrink-0 border-l border-border px-3 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+                          >
+                            {deletingKey === delKey ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Trash2 className="h-4 w-4" />
+                            )}
+                          </button>
+                        </div>
 
                         <AnimatePresence>
                           {isExpanded && (
@@ -399,48 +466,66 @@ export function WorkoutHistory({
                       </div>
                     );
                   })}
-                  {dayExtras.map((ex) => (
-                    <div
-                      key={`extra-${ex.id}`}
-                      className="overflow-hidden rounded-2xl border border-border bg-card"
-                    >
-                      <div className="flex items-center gap-3 p-4">
-                        <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-500/15">
-                          <Activity className="h-5 w-5 text-blue-400" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <h3 className="text-sm font-bold text-foreground">
-                            {ex.activity_type}
-                          </h3>
-                          <p className="text-xs text-blue-400/90">
-                            Actividad extra
-                          </p>
-                          <div className="mt-1 flex flex-wrap gap-3 text-xs text-muted-foreground">
-                            {ex.duration_minutes != null && (
-                              <span className="flex items-center gap-1">
-                                <Clock className="h-3 w-3" />
-                                {ex.duration_minutes} min
-                              </span>
-                            )}
-                            {ex.metrics?.steps != null && (
-                              <span className="flex items-center gap-1">
-                                <Footprints className="h-3 w-3" />
-                                {ex.metrics.steps.toLocaleString()} pasos
-                              </span>
-                            )}
-                            {ex.metrics?.distance_km != null && (
-                              <span>{ex.metrics.distance_km} km</span>
-                            )}
+                  {dayExtras.map((ex) => {
+                    const exDelKey = `e-${ex.id}`;
+                    return (
+                      <div
+                        key={`extra-${ex.id}`}
+                        className="overflow-hidden rounded-2xl border border-border bg-card"
+                      >
+                        <div className="flex items-stretch">
+                          <div className="flex min-w-0 flex-1 items-center gap-3 p-4">
+                            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-500/15">
+                              <Activity className="h-5 w-5 text-blue-400" />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <h3 className="text-sm font-bold text-foreground">
+                                {ex.activity_type}
+                              </h3>
+                              <p className="text-xs text-blue-400/90">
+                                Actividad extra
+                              </p>
+                              <div className="mt-1 flex flex-wrap gap-3 text-xs text-muted-foreground">
+                                {ex.duration_minutes != null && (
+                                  <span className="flex items-center gap-1">
+                                    <Clock className="h-3 w-3" />
+                                    {ex.duration_minutes} min
+                                  </span>
+                                )}
+                                {ex.metrics?.steps != null && (
+                                  <span className="flex items-center gap-1">
+                                    <Footprints className="h-3 w-3" />
+                                    {ex.metrics.steps.toLocaleString()} pasos
+                                  </span>
+                                )}
+                                {ex.metrics?.distance_km != null && (
+                                  <span>{ex.metrics.distance_km} km</span>
+                                )}
+                              </div>
+                              {ex.notes && (
+                                <p className="mt-2 text-xs text-muted-foreground">
+                                  {ex.notes}
+                                </p>
+                              )}
+                            </div>
                           </div>
-                          {ex.notes && (
-                            <p className="mt-2 text-xs text-muted-foreground">
-                              {ex.notes}
-                            </p>
-                          )}
+                          <button
+                            type="button"
+                            onClick={() => void handleDeleteExtra(ex.id)}
+                            disabled={deletingKey === exDelKey}
+                            title="Eliminar actividad"
+                            className="shrink-0 border-l border-border px-3 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+                          >
+                            {deletingKey === exDelKey ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Trash2 className="h-4 w-4" />
+                            )}
+                          </button>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             );
