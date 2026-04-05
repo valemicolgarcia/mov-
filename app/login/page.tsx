@@ -1,15 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Dumbbell, Mail, Lock, User, ArrowRight, Loader2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { useAuth } from "@/lib/auth-context";
 
 type Mode = "login" | "register";
 
 export default function LoginPage() {
+  const { user, loading: authLoading } = useAuth();
   const [mode, setMode] = useState<Mode>("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -18,6 +20,12 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const router = useRouter();
   const supabase = createClient();
+
+  useEffect(() => {
+    if (!authLoading && user) {
+      router.push("/");
+    }
+  }, [authLoading, user, router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

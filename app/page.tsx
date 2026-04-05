@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { AnimatePresence } from "framer-motion";
+import { useRouter } from "next/navigation";
 import { DaysList } from "@/components/workout/days-list";
 import { WorkoutDetail } from "@/components/workout/workout-detail";
 import { RoutineEditor } from "@/components/workout/routine-editor";
@@ -13,16 +14,23 @@ import { Loader2 } from "lucide-react";
 type View = "list" | "detail" | "editor" | "history";
 
 export default function Home() {
-  const { loading: authLoading, signOut } = useAuth();
+  const { user, loading: authLoading, signOut } = useAuth();
   const store = useWorkoutStore();
+  const router = useRouter();
   const [view, setView] = useState<View>("list");
   const [selectedDayId, setSelectedDayId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!authLoading && !user) {
+      router.push("/login");
+    }
+  }, [authLoading, user, router]);
 
   const selectedDay = selectedDayId
     ? store.routine.find((d) => d.id === selectedDayId)
     : null;
 
-  if (authLoading || store.loading) {
+  if (authLoading || store.loading || !user) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
