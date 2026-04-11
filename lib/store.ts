@@ -111,6 +111,32 @@ export function useWorkoutStore() {
     setTodayLogs(logsMap);
   }, [user, supabase]);
 
+  /** Un solo día (fecha = entreno actual o historial). Refresco al volver a la pestaña para mostrar borradores guardados. */
+  const refreshDayLog = useCallback(
+    async (dayId: string) => {
+      if (!user) return;
+      const date = activeLogDate();
+      const { data, error } = await supabase
+        .from("workout_logs")
+        .select("*")
+        .eq("user_id", user.id)
+        .eq("day_id", dayId)
+        .eq("date", date)
+        .maybeSingle();
+
+      if (error) {
+        console.error("[workout_logs] refreshDayLog:", error.message);
+        return;
+      }
+      if (!data) return;
+
+      const mapped = mapWorkoutLogRow(data);
+      todayLogsRef.current = { ...todayLogsRef.current, [dayId]: mapped };
+      setTodayLogs((prev) => ({ ...prev, [dayId]: mapped }));
+    },
+    [user, supabase, activeLogDate]
+  );
+
   useEffect(() => {
     if (!user) {
       setLoading(false);
@@ -645,6 +671,7 @@ export function useWorkoutStore() {
     updateHistoryLog,
     importRoutine,
     exportRoutine,
+    refreshDayLog,
     reload: () => Promise.all([loadRoutine(), loadTodayLogs()]),
   };
 }

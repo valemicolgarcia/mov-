@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import { ChevronDown, RotateCw, AlertCircle } from "lucide-react";
 import type { Block } from "@/lib/workout-data";
 import type { useWorkoutStore } from "@/lib/store";
@@ -77,57 +77,48 @@ export function BlockCard({ block, index, dayId, store }: BlockCardProps) {
         </motion.div>
       </button>
 
-      {/* Expandable content */}
-      <AnimatePresence initial={false}>
-        {isExpanded && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.3 }}
-            className="overflow-hidden"
-          >
-            {block.notes && (
-              <div className="mx-5 mb-4 flex items-start gap-2 rounded-lg bg-primary/10 p-3">
-                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-                <p className="text-sm text-primary/90">{block.notes}</p>
-              </div>
-            )}
-
-            <div className="space-y-4 px-5 pb-5">
-              {Array.from({ length: block.rounds }).map((_, roundIdx) => (
-                <div key={roundIdx}>
-                  {/* Round header */}
-                  {block.rounds > 1 && (
-                    <div className="mb-2 flex items-center gap-2">
-                      <div className="flex h-7 items-center rounded-lg bg-primary/10 px-3">
-                        <span className="text-xs font-bold text-primary">
-                          Serie {roundIdx + 1}
-                        </span>
-                      </div>
-                      <div className="h-px flex-1 bg-border" />
-                    </div>
-                  )}
-
-                  {/* All exercises for this round */}
-                  <div className="space-y-2">
-                    {block.exercises.map((exercise) => (
-                      <ExerciseRow
-                        key={`${exercise.id}-r${roundIdx}`}
-                        exercise={exercise}
-                        setIndex={roundIdx}
-                        dayId={dayId}
-                        store={store}
-                        roundLabel={block.rounds > 1 ? roundIdx + 1 : undefined}
-                      />
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </motion.div>
+      {/* Contenido siempre montado: si se desmontaba al colapsar, el debounce se cancelaba y se perdían peso/reps sin guardar. */}
+      <div
+        className={isExpanded ? "block" : "hidden"}
+        aria-hidden={!isExpanded}
+      >
+        {block.notes && (
+          <div className="mx-5 mb-4 flex items-start gap-2 rounded-lg bg-primary/10 p-3">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+            <p className="text-sm text-primary/90">{block.notes}</p>
+          </div>
         )}
-      </AnimatePresence>
+
+        <div className="space-y-4 px-5 pb-5">
+          {Array.from({ length: block.rounds }).map((_, roundIdx) => (
+            <div key={roundIdx}>
+              {block.rounds > 1 && (
+                <div className="mb-2 flex items-center gap-2">
+                  <div className="flex h-7 items-center rounded-lg bg-primary/10 px-3">
+                    <span className="text-xs font-bold text-primary">
+                      Serie {roundIdx + 1}
+                    </span>
+                  </div>
+                  <div className="h-px flex-1 bg-border" />
+                </div>
+              )}
+
+              <div className="space-y-2">
+                {block.exercises.map((exercise) => (
+                  <ExerciseRow
+                    key={`${exercise.id}-r${roundIdx}`}
+                    exercise={exercise}
+                    setIndex={roundIdx}
+                    dayId={dayId}
+                    store={store}
+                    roundLabel={block.rounds > 1 ? roundIdx + 1 : undefined}
+                  />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
     </motion.div>
   );
 }

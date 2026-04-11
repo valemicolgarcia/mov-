@@ -46,6 +46,10 @@ export function ExerciseRow({ exercise, setIndex, dayId, store, roundLabel }: Ex
   const pendingLocalRef = useRef(false);
   const isCheckedRef = useRef(isChecked);
   isCheckedRef.current = isChecked;
+  const weightRef = useRef(weight);
+  const repsRef = useRef(reps);
+  weightRef.current = weight;
+  repsRef.current = reps;
 
   const savedSnap =
     savedSet != null
@@ -90,7 +94,7 @@ export function ExerciseRow({ exercise, setIndex, dayId, store, roundLabel }: Ex
         r,
         isCheckedRef.current
       );
-    }, 300);
+    }, 200);
     return () => clearTimeout(t);
   }, [
     weight,
@@ -101,15 +105,15 @@ export function ExerciseRow({ exercise, setIndex, dayId, store, roundLabel }: Ex
     setIndex,
     exercise.isChecklist,
     exercise.isTimeBased,
-    store,
+    store.saveSet,
   ]);
 
   useEffect(() => {
     if (exercise.isChecklist || exercise.isTimeBased) return;
     const flush = () => {
       if (document.visibilityState !== "hidden") return;
-      const w = parseFloat(weight) || 0;
-      const r = parseInt(reps, 10) || 0;
+      const w = parseFloat(weightRef.current) || 0;
+      const r = parseInt(repsRef.current, 10) || 0;
       void store.saveSet(dayId, exercise.id, setIndex, w, r, isCheckedRef.current);
     };
     document.addEventListener("visibilitychange", flush);
@@ -118,14 +122,24 @@ export function ExerciseRow({ exercise, setIndex, dayId, store, roundLabel }: Ex
       document.removeEventListener("visibilitychange", flush);
       window.removeEventListener("pagehide", flush);
     };
-  }, [weight, reps, dayId, exercise.id, setIndex, exercise.isChecklist, exercise.isTimeBased, store]);
+  }, [dayId, exercise.id, setIndex, exercise.isChecklist, exercise.isTimeBased, store.saveSet]);
+
+  // Al desmontar (salir de la pantalla, etc.): el cleanup del debounce cancela el timeout; guardamos igual.
+  useEffect(() => {
+    if (exercise.isChecklist || exercise.isTimeBased) return;
+    return () => {
+      const w = parseFloat(weightRef.current) || 0;
+      const r = parseInt(repsRef.current, 10) || 0;
+      void store.saveSet(dayId, exercise.id, setIndex, w, r, isCheckedRef.current);
+    };
+  }, [dayId, exercise.id, setIndex, exercise.isChecklist, exercise.isTimeBased, store.saveSet]);
 
   // Load previous session data
   useEffect(() => {
     store.getLastSession(exercise.id).then((data) => {
       if (data) setPreviousSets(data);
     });
-  }, [exercise.id, store]);
+  }, [exercise.id, store.getLastSession]);
 
   useEffect(() => {
     if (!exercise.isTimeBased) return;
@@ -151,7 +165,7 @@ export function ExerciseRow({ exercise, setIndex, dayId, store, roundLabel }: Ex
       store.markExerciseComplete(dayId, exercise.id, true, setIndex);
     }
     return () => clearInterval(interval);
-  }, [isRunning, timeLeft, dayId, exercise.id, store]);
+  }, [isRunning, timeLeft, dayId, exercise.id, store.markExerciseComplete]);
 
   const resetTimer = useCallback(() => {
     setTimeLeft(exercise.targetTime || 0);
@@ -175,6 +189,27 @@ export function ExerciseRow({ exercise, setIndex, dayId, store, roundLabel }: Ex
     const newVal = Math.max(0, num + delta);
     setter(newVal.toString());
   };
+
+  const flushDraftNow = useCallback(() => {
+    if (exercise.isChecklist || exercise.isTimeBased) return;
+    const w = parseFloat(weightRef.current) || 0;
+    const r = parseInt(repsRef.current, 10) || 0;
+    void store.saveSet(
+      dayId,
+      exercise.id,
+      setIndex,
+      w,
+      r,
+      isCheckedRef.current
+    );
+  }, [
+    dayId,
+    exercise.id,
+    exercise.isChecklist,
+    exercise.isTimeBased,
+    setIndex,
+    store.saveSet,
+  ]);
 
   const handleComplete = () => {
     const newChecked = !isChecked;
@@ -399,6 +434,7 @@ export function ExerciseRow({ exercise, setIndex, dayId, store, roundLabel }: Ex
                 }}
                 onBlur={() => {
                   inputsFocusedRef.current = false;
+                  flushDraftNow();
                 }}
                 placeholder={previousSet?.weight ? previousSet.weight.toString() : "0"}
                 className="h-10 w-full rounded-lg bg-background px-3 text-center text-lg font-bold tabular-nums text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary"
@@ -437,6 +473,7 @@ export function ExerciseRow({ exercise, setIndex, dayId, store, roundLabel }: Ex
                 }}
                 onBlur={() => {
                   inputsFocusedRef.current = false;
+                  flushDraftNow();
                 }}
                 placeholder={previousSet?.reps ? previousSet.reps.toString() : "0"}
                 className="h-10 w-full rounded-lg bg-background px-3 text-center text-lg font-bold tabular-nums text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary"
