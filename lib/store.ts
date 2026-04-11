@@ -52,9 +52,6 @@ export function useWorkoutStore() {
   const [editingDate, setEditingDate] = useState<string | null>(null);
   const savedTodayLogs = useRef<Record<string, WorkoutLog>>({});
   const todayLogsRef = useRef<Record<string, WorkoutLog>>({});
-  const visibilityReloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null
-  );
 
   useEffect(() => {
     todayLogsRef.current = todayLogs;
@@ -122,26 +119,8 @@ export function useWorkoutStore() {
     };
   }, [user, loadRoutine, loadTodayLogs]);
 
-  useEffect(() => {
-    if (!user) return;
-    const onVis = () => {
-      if (document.visibilityState !== "visible") return;
-      if (visibilityReloadTimerRef.current) {
-        clearTimeout(visibilityReloadTimerRef.current);
-      }
-      visibilityReloadTimerRef.current = setTimeout(() => {
-        visibilityReloadTimerRef.current = null;
-        void loadTodayLogs();
-      }, 1000);
-    };
-    document.addEventListener("visibilitychange", onVis);
-    return () => {
-      document.removeEventListener("visibilitychange", onVis);
-      if (visibilityReloadTimerRef.current) {
-        clearTimeout(visibilityReloadTimerRef.current);
-      }
-    };
-  }, [user, loadTodayLogs]);
+  // No recargar workout_logs al volver a la pestaña: el fetch podía traer datos viejos antes del upsert
+  // y ExerciseRow pisaba los inputs. El estado sigue en memoria; saveSet persiste en Supabase.
 
   // Save full routine
   const saveRoutine = useCallback(

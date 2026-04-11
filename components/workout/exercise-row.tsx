@@ -42,6 +42,8 @@ export function ExerciseRow({ exercise, setIndex, dayId, store, roundLabel }: Ex
   const [showHistory, setShowHistory] = useState(false);
 
   const inputsFocusedRef = useRef(false);
+  /** Hay edición local que aún no coincide con lo último del servidor (evita pisar con datos viejos al re-fetch). */
+  const pendingLocalRef = useRef(false);
   const isCheckedRef = useRef(isChecked);
   isCheckedRef.current = isChecked;
 
@@ -50,12 +52,25 @@ export function ExerciseRow({ exercise, setIndex, dayId, store, roundLabel }: Ex
       ? `${savedSet.weight}-${savedSet.reps}-${savedSet.completed}`
       : "";
 
+  const localMatchesSaved = useCallback(() => {
+    const w = parseFloat(weight) || 0;
+    const r = parseInt(reps, 10) || 0;
+    if (!savedSet) return w === 0 && r === 0 && !isChecked;
+    return (
+      w === savedSet.weight &&
+      r === savedSet.reps &&
+      isChecked === savedSet.completed
+    );
+  }, [weight, reps, isChecked, savedSet]);
+
   useEffect(() => {
     if (inputsFocusedRef.current) return;
+    if (pendingLocalRef.current && !localMatchesSaved()) return;
+    if (localMatchesSaved()) pendingLocalRef.current = false;
     setWeight(savedSet?.weight ? String(savedSet.weight) : "");
     setReps(savedSet?.reps ? String(savedSet.reps) : "");
     setIsChecked(savedSet?.completed ?? false);
-  }, [savedSnap, exercise.id, setIndex, dayId]);
+  }, [savedSnap, exercise.id, setIndex, dayId, localMatchesSaved]);
 
   // Borrador en Supabase mientras editás peso/reps (no hace falta tocar el tilde para no perder datos al cambiar de app)
   useEffect(() => {
@@ -75,7 +90,7 @@ export function ExerciseRow({ exercise, setIndex, dayId, store, roundLabel }: Ex
         r,
         isCheckedRef.current
       );
-    }, 450);
+    }, 300);
     return () => clearTimeout(t);
   }, [
     weight,
@@ -155,6 +170,7 @@ export function ExerciseRow({ exercise, setIndex, dayId, store, roundLabel }: Ex
     delta: number,
     setter: (val: string) => void
   ) => {
+    pendingLocalRef.current = true;
     const num = parseFloat(current) || 0;
     const newVal = Math.max(0, num + delta);
     setter(newVal.toString());
@@ -167,6 +183,7 @@ export function ExerciseRow({ exercise, setIndex, dayId, store, roundLabel }: Ex
     if (exercise.isChecklist || exercise.isTimeBased) {
       store.markExerciseComplete(dayId, exercise.id, newChecked, setIndex);
     } else {
+      pendingLocalRef.current = true;
       const w = parseFloat(weight) || 0;
       const r = parseInt(reps, 10) || 0;
       void store.saveSet(dayId, exercise.id, setIndex, w, r, newChecked);
@@ -373,7 +390,10 @@ export function ExerciseRow({ exercise, setIndex, dayId, store, roundLabel }: Ex
                 type="number"
                 inputMode="decimal"
                 value={weight}
-                onChange={(e) => setWeight(e.target.value)}
+                onChange={(e) => {
+                  pendingLocalRef.current = true;
+                  setWeight(e.target.value);
+                }}
                 onFocus={() => {
                   inputsFocusedRef.current = true;
                 }}
@@ -408,7 +428,10 @@ export function ExerciseRow({ exercise, setIndex, dayId, store, roundLabel }: Ex
                 type="number"
                 inputMode="numeric"
                 value={reps}
-                onChange={(e) => setReps(e.target.value)}
+                onChange={(e) => {
+                  pendingLocalRef.current = true;
+                  setReps(e.target.value);
+                }}
                 onFocus={() => {
                   inputsFocusedRef.current = true;
                 }}
