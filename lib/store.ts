@@ -52,10 +52,20 @@ export function useWorkoutStore() {
   const [editingDate, setEditingDate] = useState<string | null>(null);
   const savedTodayLogs = useRef<Record<string, WorkoutLog>>({});
   const todayLogsRef = useRef<Record<string, WorkoutLog>>({});
+  /** Fecha del log que estamos editando (historial); sincronizada antes que React state para saveSet/loads. */
+  const editingDateRef = useRef<string | null>(null);
 
   useEffect(() => {
     todayLogsRef.current = todayLogs;
   }, [todayLogs]);
+
+  useEffect(() => {
+    editingDateRef.current = editingDate;
+  }, [editingDate]);
+
+  const activeLogDate = useCallback(() => {
+    return editingDateRef.current ?? todayStr();
+  }, []);
 
   // Load routine from Supabase
   const loadRoutine = useCallback(async () => {
@@ -78,9 +88,11 @@ export function useWorkoutStore() {
     }
   }, [user, supabase]);
 
-  // Load today's logs from Supabase
+  // Load today's logs from Supabase (solo día actual). No pisar estado si estamos editando una fecha pasada.
   const loadTodayLogs = useCallback(async () => {
     if (!user) return;
+    if (editingDateRef.current !== null) return;
+
     const { data, error } = await supabase
       .from("workout_logs")
       .select("*")
@@ -148,7 +160,7 @@ export function useWorkoutStore() {
       completed: boolean
     ) => {
       if (!user) return;
-      const date = editingDate || todayStr();
+      const date = activeLogDate();
       const existing = todayLogsRef.current[dayId];
       const exercises: Record<string, SetLog[]> = existing?.exercises
         ? { ...existing.exercises }
@@ -202,7 +214,7 @@ export function useWorkoutStore() {
         setTodayLogs((prev) => ({ ...prev, [dayId]: mapped }));
       }
     },
-    [user, supabase, editingDate]
+    [user, supabase, activeLogDate]
   );
 
   const logSet = useCallback(
@@ -219,7 +231,7 @@ export function useWorkoutStore() {
   const markExerciseComplete = useCallback(
     async (dayId: string, exerciseId: string, completed: boolean, setIndex = 0) => {
       if (!user) return;
-      const date = editingDate || todayStr();
+      const date = activeLogDate();
       const existing = todayLogsRef.current[dayId];
       const exercises: Record<string, SetLog[]> = existing?.exercises
         ? { ...existing.exercises }
@@ -273,14 +285,14 @@ export function useWorkoutStore() {
         setTodayLogs((prev) => ({ ...prev, [dayId]: mapped }));
       }
     },
-    [user, supabase, editingDate]
+    [user, supabase, activeLogDate]
   );
 
   // Finish workout for a day
   const finishWorkout = useCallback(
     async (dayId: string) => {
       if (!user) return;
-      const date = editingDate || todayStr();
+      const date = activeLogDate();
       const existing = todayLogsRef.current[dayId];
       if (!existing) return;
 
@@ -303,7 +315,7 @@ export function useWorkoutStore() {
         [dayId]: { ...prev[dayId], completed: true },
       }));
     },
-    [user, supabase, editingDate]
+    [user, supabase, activeLogDate]
   );
 
   // Get exercise history (last N sessions)
@@ -496,6 +508,8 @@ export function useWorkoutStore() {
     async (dayId: string, date: string) => {
       if (!user) return;
       savedTodayLogs.current = todayLogs;
+      editingDateRef.current = date;
+      setEditingDate(date);
 
       const { data } = await supabase
         .from("workout_logs")
@@ -513,14 +527,13 @@ export function useWorkoutStore() {
         todayLogsRef.current = {};
         setTodayLogs({});
       }
-
-      setEditingDate(date);
     },
     [user, supabase, todayLogs]
   );
 
   // Exit history editing mode: restore today's actual logs
   const stopEditingHistory = useCallback(async () => {
+    editingDateRef.current = null;
     setEditingDate(null);
     const restored = savedTodayLogs.current;
     savedTodayLogs.current = {};
