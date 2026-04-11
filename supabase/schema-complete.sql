@@ -50,6 +50,9 @@ create table if not exists public.workout_logs (
   unique(user_id, day_id, date)
 );
 
+alter table public.workout_logs
+  add column if not exists completion_order jsonb not null default '[]'::jsonb;
+
 alter table public.workout_logs enable row level security;
 
 create index if not exists idx_workout_logs_user_date

@@ -179,6 +179,7 @@ export function WorkoutDetail({ day, store, onBack }: WorkoutDetailProps) {
           <WorkoutReceipt
             day={day}
             exercises={dayLog.exercises}
+            completion_order={dayLog.completion_order}
             date={dayLog.date}
             onClose={() => setShowReceipt(false)}
           />

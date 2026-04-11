@@ -157,6 +157,9 @@ export function useProfessorStore() {
         day_id: log.day_id,
         date: log.date,
         exercises: log.exercises as Record<string, SetLog[]>,
+        completion_order: Array.isArray(log.completion_order)
+          ? (log.completion_order as string[])
+          : [],
         completed: log.completed,
       }));
     },

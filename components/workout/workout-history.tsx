@@ -542,6 +542,7 @@ export function WorkoutHistory({
           <WorkoutReceipt
             day={getDayInfo(receiptLog.day_id)!}
             exercises={receiptLog.exercises}
+            completion_order={receiptLog.completion_order}
             date={receiptLog.date}
             onClose={() => setReceiptLog(null)}
           />

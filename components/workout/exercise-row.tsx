@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ExternalLink,
@@ -41,12 +41,85 @@ export function ExerciseRow({ exercise, setIndex, dayId, store, roundLabel }: Ex
   const [previousSets, setPreviousSets] = useState<SetLog[] | null>(null);
   const [showHistory, setShowHistory] = useState(false);
 
+  const inputsFocusedRef = useRef(false);
+  const isCheckedRef = useRef(isChecked);
+  isCheckedRef.current = isChecked;
+
+  const savedSnap =
+    savedSet != null
+      ? `${savedSet.weight}-${savedSet.reps}-${savedSet.completed}`
+      : "";
+
+  useEffect(() => {
+    if (inputsFocusedRef.current) return;
+    setWeight(savedSet?.weight ? String(savedSet.weight) : "");
+    setReps(savedSet?.reps ? String(savedSet.reps) : "");
+    setIsChecked(savedSet?.completed ?? false);
+  }, [savedSnap, exercise.id, setIndex, dayId]);
+
+  // Borrador en Supabase mientras editás peso/reps (no hace falta tocar el tilde para no perder datos al cambiar de app)
+  useEffect(() => {
+    if (exercise.isChecklist || exercise.isTimeBased) return;
+    const w = parseFloat(weight) || 0;
+    const r = parseInt(reps, 10) || 0;
+    const sw = savedSet?.weight ?? 0;
+    const sr = savedSet?.reps ?? 0;
+    const sc = savedSet?.completed ?? false;
+    if (w === sw && r === sr && isCheckedRef.current === sc) return;
+    const t = setTimeout(() => {
+      void store.saveSet(
+        dayId,
+        exercise.id,
+        setIndex,
+        w,
+        r,
+        isCheckedRef.current
+      );
+    }, 450);
+    return () => clearTimeout(t);
+  }, [
+    weight,
+    reps,
+    savedSnap,
+    dayId,
+    exercise.id,
+    setIndex,
+    exercise.isChecklist,
+    exercise.isTimeBased,
+    store,
+  ]);
+
+  useEffect(() => {
+    if (exercise.isChecklist || exercise.isTimeBased) return;
+    const flush = () => {
+      if (document.visibilityState !== "hidden") return;
+      const w = parseFloat(weight) || 0;
+      const r = parseInt(reps, 10) || 0;
+      void store.saveSet(dayId, exercise.id, setIndex, w, r, isCheckedRef.current);
+    };
+    document.addEventListener("visibilitychange", flush);
+    window.addEventListener("pagehide", flush);
+    return () => {
+      document.removeEventListener("visibilitychange", flush);
+      window.removeEventListener("pagehide", flush);
+    };
+  }, [weight, reps, dayId, exercise.id, setIndex, exercise.isChecklist, exercise.isTimeBased, store]);
+
   // Load previous session data
   useEffect(() => {
     store.getLastSession(exercise.id).then((data) => {
       if (data) setPreviousSets(data);
     });
   }, [exercise.id, store]);
+
+  useEffect(() => {
+    if (!exercise.isTimeBased) return;
+    if (savedSet?.completed) {
+      setIsChecked(true);
+      setTimeLeft(0);
+      setIsRunning(false);
+    }
+  }, [exercise.isTimeBased, savedSnap]);
 
   const previousSet = previousSets?.[setIndex];
 
@@ -95,10 +168,8 @@ export function ExerciseRow({ exercise, setIndex, dayId, store, roundLabel }: Ex
       store.markExerciseComplete(dayId, exercise.id, newChecked, setIndex);
     } else {
       const w = parseFloat(weight) || 0;
-      const r = parseInt(reps) || 0;
-      if (newChecked) {
-        store.logSet(dayId, exercise.id, setIndex, w, r);
-      }
+      const r = parseInt(reps, 10) || 0;
+      void store.saveSet(dayId, exercise.id, setIndex, w, r, newChecked);
     }
   };
 
@@ -263,9 +334,14 @@ export function ExerciseRow({ exercise, setIndex, dayId, store, roundLabel }: Ex
           >
             <TrendingUp className="h-3.5 w-3.5" />
           </button>
-          <span className="ml-auto text-xs text-muted-foreground">
-            Obj: {exercise.targetReps}
-          </span>
+          <div className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
+            {roundLabel != null && (
+              <span className="rounded bg-primary/15 px-1.5 py-0.5 font-medium text-primary">
+                V{roundLabel}
+              </span>
+            )}
+            <span>Obj: {exercise.targetReps}</span>
+          </div>
         </div>
 
         {/* Previous session reference */}
@@ -298,6 +374,12 @@ export function ExerciseRow({ exercise, setIndex, dayId, store, roundLabel }: Ex
                 inputMode="decimal"
                 value={weight}
                 onChange={(e) => setWeight(e.target.value)}
+                onFocus={() => {
+                  inputsFocusedRef.current = true;
+                }}
+                onBlur={() => {
+                  inputsFocusedRef.current = false;
+                }}
                 placeholder={previousSet?.weight ? previousSet.weight.toString() : "0"}
                 className="h-10 w-full rounded-lg bg-background px-3 text-center text-lg font-bold tabular-nums text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary"
               />
@@ -327,6 +409,12 @@ export function ExerciseRow({ exercise, setIndex, dayId, store, roundLabel }: Ex
                 inputMode="numeric"
                 value={reps}
                 onChange={(e) => setReps(e.target.value)}
+                onFocus={() => {
+                  inputsFocusedRef.current = true;
+                }}
+                onBlur={() => {
+                  inputsFocusedRef.current = false;
+                }}
                 placeholder={previousSet?.reps ? previousSet.reps.toString() : "0"}
                 className="h-10 w-full rounded-lg bg-background px-3 text-center text-lg font-bold tabular-nums text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary"
               />

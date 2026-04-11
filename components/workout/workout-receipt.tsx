@@ -11,11 +11,17 @@ import {
   CheckSquare,
   Loader2,
 } from "lucide-react";
-import type { WorkoutDay, SetLog } from "@/lib/workout-data";
+import {
+  buildReceiptLines,
+  type WorkoutDay,
+  type SetLog,
+} from "@/lib/workout-data";
 
 interface WorkoutReceiptProps {
   day: WorkoutDay;
   exercises: Record<string, SetLog[]>;
+  /** Orden cronológico de series completadas; si falta, se usa la rutina + datos huérfanos. */
+  completion_order?: string[];
   date: string;
   onClose: () => void;
 }
@@ -33,6 +39,7 @@ function formatDate(dateStr: string) {
 export function WorkoutReceipt({
   day,
   exercises,
+  completion_order,
   date,
   onClose,
 }: WorkoutReceiptProps) {
@@ -63,27 +70,9 @@ export function WorkoutReceipt({
     }
   };
 
-  const completedBlocks = day.blocks
-    .map((block) => {
-      const exercisesWithData = block.exercises
-        .map((exercise) => {
-          const sets = exercises[exercise.id];
-          if (!sets || sets.length === 0) return null;
+  const lines = buildReceiptLines(day, exercises, completion_order);
 
-          const completedSets = sets.filter((s) => s?.completed);
-          if (completedSets.length === 0) return null;
-
-          return {
-            exercise,
-            sets: sets.filter((s) => s?.completed),
-          };
-        })
-        .filter(Boolean);
-
-      if (exercisesWithData.length === 0) return null;
-      return { block, exercises: exercisesWithData };
-    })
-    .filter(Boolean);
+  const distinctBlocks = new Set(lines.map((l) => l.blockName)).size;
 
   const totalSetsCompleted = Object.values(exercises).reduce(
     (acc, sets) => acc + (sets?.filter((s) => s?.completed).length || 0),
@@ -103,7 +92,6 @@ export function WorkoutReceipt({
         exit={{ opacity: 0, scale: 0.9, y: 20 }}
         className="relative mx-4 flex max-h-[90vh] w-full max-w-md flex-col"
       >
-        {/* Action buttons */}
         <div className="mb-3 flex items-center justify-between">
           <button
             onClick={handleDownload}
@@ -125,15 +113,12 @@ export function WorkoutReceipt({
           </button>
         </div>
 
-        {/* Scrollable receipt */}
         <div className="overflow-y-auto rounded-2xl">
-          {/* ---- RECEIPT CARD (this gets captured) ---- */}
           <div
             ref={receiptRef}
             className="w-full rounded-2xl border border-neutral-800 bg-[#0a0a0a] p-6"
             style={{ fontFamily: "Inter, system-ui, sans-serif" }}
           >
-            {/* Header */}
             <div className="mb-5 text-center">
               <div className="mb-2 flex items-center justify-center gap-2">
                 <Dumbbell className="h-5 w-5 text-orange-400" />
@@ -150,7 +135,6 @@ export function WorkoutReceipt({
               </p>
             </div>
 
-            {/* Stats */}
             <div className="mb-5 flex items-center justify-center gap-6 rounded-xl bg-neutral-900 p-3">
               <div className="text-center">
                 <div className="text-2xl font-black text-orange-400">
@@ -163,7 +147,7 @@ export function WorkoutReceipt({
               <div className="h-8 w-px bg-neutral-800" />
               <div className="text-center">
                 <div className="text-2xl font-black text-orange-400">
-                  {completedBlocks.length}
+                  {distinctBlocks}
                 </div>
                 <div className="text-[10px] font-medium uppercase tracking-wider text-neutral-500">
                   Bloques
@@ -180,93 +164,77 @@ export function WorkoutReceipt({
               </div>
             </div>
 
-            {/* Separator */}
             <div className="mb-4 flex items-center gap-2">
               <div className="h-px flex-1 bg-neutral-800" />
               <span className="text-[10px] font-bold uppercase tracking-widest text-neutral-600">
-                Detalle
+                Detalle (orden de ejecución)
               </span>
               <div className="h-px flex-1 bg-neutral-800" />
             </div>
 
-            {/* Blocks */}
-            <div className="space-y-4">
-              {completedBlocks.map((item) => {
-                if (!item) return null;
-                const { block, exercises: blockExercises } = item;
+            <div className="space-y-0">
+              {lines.map((item, idx) => {
+                const showBlock =
+                  idx === 0 || item.blockName !== lines[idx - 1]!.blockName;
+                const { exercise, setIndex, set } = item;
+                const isWeight =
+                  !exercise.isChecklist && !exercise.isTimeBased;
+                const roundLabel =
+                  exercise.sets > 1 || setIndex > 0
+                    ? ` · S${setIndex + 1}`
+                    : "";
 
                 return (
-                  <div key={block.id}>
-                    <div className="mb-2 flex items-center gap-2">
-                      <div className="h-1.5 w-1.5 rounded-full bg-orange-400" />
-                      <h3 className="text-xs font-bold uppercase tracking-wide text-neutral-300">
-                        {block.name}
-                      </h3>
-                    </div>
-
-                    <div className="space-y-1 pl-4">
-                      {blockExercises.map((exItem) => {
-                        if (!exItem) return null;
-                        const { exercise, sets } = exItem;
-                        const isWeight =
-                          !exercise.isChecklist && !exercise.isTimeBased;
-
-                        return (
-                          <div
-                            key={exercise.id}
-                            className="flex items-start gap-2 py-1"
-                          >
-                            <div className="mt-0.5">
-                              {exercise.isTimeBased ? (
-                                <Timer className="h-3 w-3 text-blue-400" />
-                              ) : exercise.isChecklist ? (
-                                <CheckSquare className="h-3 w-3 text-green-400" />
-                              ) : (
-                                <Dumbbell className="h-3 w-3 text-orange-400" />
-                              )}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <span className="text-sm font-medium text-neutral-200">
-                                {exercise.name}
-                              </span>
-                              {isWeight && (
-                                <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5">
-                                  {sets.map((set, idx) => (
-                                    <span
-                                      key={idx}
-                                      className="text-xs text-neutral-400"
-                                    >
-                                      S{idx + 1}:{" "}
-                                      <span className="font-semibold text-neutral-200">
-                                        {set.weight}kg
-                                      </span>{" "}
-                                      ×{" "}
-                                      <span className="font-semibold text-neutral-200">
-                                        {set.reps}
-                                      </span>
-                                    </span>
-                                  ))}
-                                </div>
-                              )}
-                              {!isWeight && (
-                                <div className="mt-0.5 flex items-center gap-1">
-                                  <Check className="h-3 w-3 text-green-400" />
-                                  <span className="text-xs text-green-400">
-                                    {sets.length}x completado
-                                  </span>
-                                </div>
-                              )}
-                            </div>
+                  <div key={`${exercise.id}-${setIndex}-${idx}`}>
+                    {showBlock && (
+                      <div className="mb-2 mt-4 flex items-center gap-2 first:mt-0">
+                        <div className="h-1.5 w-1.5 rounded-full bg-orange-400" />
+                        <h3 className="text-xs font-bold uppercase tracking-wide text-neutral-300">
+                          {item.blockName}
+                        </h3>
+                      </div>
+                    )}
+                    <div className="flex items-start gap-2 border-b border-neutral-900/80 py-2 pl-4">
+                      <div className="mt-0.5">
+                        {exercise.isTimeBased ? (
+                          <Timer className="h-3 w-3 text-blue-400" />
+                        ) : exercise.isChecklist ? (
+                          <CheckSquare className="h-3 w-3 text-green-400" />
+                        ) : (
+                          <Dumbbell className="h-3 w-3 text-orange-400" />
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <span className="text-sm font-medium text-neutral-200">
+                          {exercise.name}
+                          <span className="text-neutral-500">{roundLabel}</span>
+                        </span>
+                        {isWeight && (
+                          <div className="mt-0.5 text-xs text-neutral-400">
+                            <span className="font-semibold text-neutral-200">
+                              {set.weight}kg
+                            </span>{" "}
+                            ×{" "}
+                            <span className="font-semibold text-neutral-200">
+                              {set.reps}
+                            </span>
                           </div>
-                        );
-                      })}
+                        )}
+                        {!isWeight && (
+                          <div className="mt-0.5 flex items-center gap-1">
+                            <Check className="h-3 w-3 text-green-400" />
+                            <span className="text-xs text-green-400">
+                              Completado
+                            </span>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
                 );
               })}
             </div>
 
-            {/* Footer */}
             <div className="mt-6 border-t border-neutral-800 pt-4 text-center">
               <p className="text-[10px] font-medium uppercase tracking-[0.2em] text-neutral-600">
                 Entrenamiento completado

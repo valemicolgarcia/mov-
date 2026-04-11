@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import {
+  mergeCompletionOrder,
   workoutLogHasActivity,
   type WorkoutDay,
   type WorkoutLog,
@@ -16,6 +17,31 @@ function todayStr() {
   return localDateStr();
 }
 
+function parseCompletionOrder(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((x): x is string => typeof x === "string");
+}
+
+function mapWorkoutLogRow(log: {
+  id: string;
+  user_id: string;
+  day_id: string;
+  date: string;
+  exercises: unknown;
+  completed: boolean | null;
+  completion_order?: unknown;
+}): WorkoutLog {
+  return {
+    id: log.id,
+    user_id: log.user_id,
+    day_id: log.day_id,
+    date: log.date,
+    exercises: (log.exercises ?? {}) as Record<string, SetLog[]>,
+    completion_order: parseCompletionOrder(log.completion_order),
+    completed: !!log.completed,
+  };
+}
+
 export function useWorkoutStore() {
   const { user } = useAuth();
   const supabase = createClient();
@@ -25,6 +51,14 @@ export function useWorkoutStore() {
   const [loading, setLoading] = useState(true);
   const [editingDate, setEditingDate] = useState<string | null>(null);
   const savedTodayLogs = useRef<Record<string, WorkoutLog>>({});
+  const todayLogsRef = useRef<Record<string, WorkoutLog>>({});
+  const visibilityReloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
+
+  useEffect(() => {
+    todayLogsRef.current = todayLogs;
+  }, [todayLogs]);
 
   // Load routine from Supabase
   const loadRoutine = useCallback(async () => {
@@ -63,14 +97,7 @@ export function useWorkoutStore() {
 
     const logsMap: Record<string, WorkoutLog> = {};
     (data ?? []).forEach((log) => {
-      logsMap[log.day_id] = {
-        id: log.id,
-        user_id: log.user_id,
-        day_id: log.day_id,
-        date: log.date,
-        exercises: log.exercises as Record<string, SetLog[]>,
-        completed: log.completed,
-      };
+      logsMap[log.day_id] = mapWorkoutLogRow(log);
     });
     setTodayLogs(logsMap);
   }, [user, supabase]);
@@ -98,12 +125,22 @@ export function useWorkoutStore() {
   useEffect(() => {
     if (!user) return;
     const onVis = () => {
-      if (document.visibilityState === "visible") {
-        void loadTodayLogs();
+      if (document.visibilityState !== "visible") return;
+      if (visibilityReloadTimerRef.current) {
+        clearTimeout(visibilityReloadTimerRef.current);
       }
+      visibilityReloadTimerRef.current = setTimeout(() => {
+        visibilityReloadTimerRef.current = null;
+        void loadTodayLogs();
+      }, 1000);
     };
     document.addEventListener("visibilitychange", onVis);
-    return () => document.removeEventListener("visibilitychange", onVis);
+    return () => {
+      document.removeEventListener("visibilitychange", onVis);
+      if (visibilityReloadTimerRef.current) {
+        clearTimeout(visibilityReloadTimerRef.current);
+      }
+    };
   }, [user, loadTodayLogs]);
 
   // Save full routine
@@ -121,36 +158,54 @@ export function useWorkoutStore() {
     [user, supabase]
   );
 
-  // Log a set (upserts the whole day log)
-  const logSet = useCallback(
+  /** Guarda una serie (peso/reps) y si está completada; evita pisar otros ejercicios usando el último estado en ref. */
+  const saveSet = useCallback(
     async (
       dayId: string,
       exerciseId: string,
       setIndex: number,
       weight: number,
-      reps: number
+      reps: number,
+      completed: boolean
     ) => {
       if (!user) return;
       const date = editingDate || todayStr();
-      const existing = todayLogs[dayId];
-      const exercises = existing?.exercises
+      const existing = todayLogsRef.current[dayId];
+      const exercises: Record<string, SetLog[]> = existing?.exercises
         ? { ...existing.exercises }
         : {};
-
-      if (!exercises[exerciseId]) {
-        exercises[exerciseId] = [];
-      }
+      if (!exercises[exerciseId]) exercises[exerciseId] = [];
       const sets = [...exercises[exerciseId]];
-      sets[setIndex] = { weight, reps, completed: true };
+      while (sets.length <= setIndex) {
+        sets.push({ weight: 0, reps: 0, completed: false });
+      }
+      sets[setIndex] = { weight, reps, completed };
       exercises[exerciseId] = sets;
+
+      const completion_order = mergeCompletionOrder(
+        existing?.completion_order,
+        exerciseId,
+        setIndex,
+        completed
+      );
 
       const logData = {
         user_id: user.id,
         day_id: dayId,
         date,
         exercises,
+        completion_order,
         completed: existing?.completed ?? false,
       };
+
+      const optimistic: WorkoutLog = {
+        ...existing,
+        ...logData,
+        id: existing?.id,
+        user_id: user.id,
+      };
+      todayLogsRef.current = { ...todayLogsRef.current, [dayId]: optimistic };
+      setTodayLogs((prev) => ({ ...prev, [dayId]: optimistic }));
 
       const { data, error } = await supabase
         .from("workout_logs")
@@ -159,50 +214,69 @@ export function useWorkoutStore() {
         .single();
 
       if (error) {
-        console.error("[workout_logs] logSet:", error.message);
+        console.error("[workout_logs] saveSet:", error.message);
         return;
       }
       if (data) {
-        setTodayLogs((prev) => ({
-          ...prev,
-          [dayId]: {
-            id: data.id,
-            user_id: data.user_id,
-            day_id: data.day_id,
-            date: data.date,
-            exercises: data.exercises as Record<string, SetLog[]>,
-            completed: data.completed,
-          },
-        }));
+        const mapped = mapWorkoutLogRow(data);
+        todayLogsRef.current = { ...todayLogsRef.current, [dayId]: mapped };
+        setTodayLogs((prev) => ({ ...prev, [dayId]: mapped }));
       }
     },
-    [user, supabase, todayLogs, editingDate]
+    [user, supabase, editingDate]
   );
 
-  // Mark a checklist/timer exercise as complete
+  const logSet = useCallback(
+    async (
+      dayId: string,
+      exerciseId: string,
+      setIndex: number,
+      weight: number,
+      reps: number
+    ) => saveSet(dayId, exerciseId, setIndex, weight, reps, true),
+    [saveSet]
+  );
+
   const markExerciseComplete = useCallback(
     async (dayId: string, exerciseId: string, completed: boolean, setIndex = 0) => {
       if (!user) return;
       const date = editingDate || todayStr();
-      const existing = todayLogs[dayId];
-      const exercises = existing?.exercises
+      const existing = todayLogsRef.current[dayId];
+      const exercises: Record<string, SetLog[]> = existing?.exercises
         ? { ...existing.exercises }
         : {};
-
-      if (!exercises[exerciseId]) {
-        exercises[exerciseId] = [];
-      }
+      if (!exercises[exerciseId]) exercises[exerciseId] = [];
       const sets = [...exercises[exerciseId]];
+      while (sets.length <= setIndex) {
+        sets.push({ weight: 0, reps: 0, completed: false });
+      }
       sets[setIndex] = { weight: 0, reps: 0, completed };
       exercises[exerciseId] = sets;
+
+      const completion_order = mergeCompletionOrder(
+        existing?.completion_order,
+        exerciseId,
+        setIndex,
+        completed
+      );
 
       const logData = {
         user_id: user.id,
         day_id: dayId,
         date,
         exercises,
+        completion_order,
         completed: existing?.completed ?? false,
       };
+
+      const optimistic: WorkoutLog = {
+        ...existing,
+        ...logData,
+        id: existing?.id,
+        user_id: user.id,
+      };
+      todayLogsRef.current = { ...todayLogsRef.current, [dayId]: optimistic };
+      setTodayLogs((prev) => ({ ...prev, [dayId]: optimistic }));
 
       const { data, error } = await supabase
         .from("workout_logs")
@@ -215,20 +289,12 @@ export function useWorkoutStore() {
         return;
       }
       if (data) {
-        setTodayLogs((prev) => ({
-          ...prev,
-          [dayId]: {
-            id: data.id,
-            user_id: data.user_id,
-            day_id: data.day_id,
-            date: data.date,
-            exercises: data.exercises as Record<string, SetLog[]>,
-            completed: data.completed,
-          },
-        }));
+        const mapped = mapWorkoutLogRow(data);
+        todayLogsRef.current = { ...todayLogsRef.current, [dayId]: mapped };
+        setTodayLogs((prev) => ({ ...prev, [dayId]: mapped }));
       }
     },
-    [user, supabase, todayLogs, editingDate]
+    [user, supabase, editingDate]
   );
 
   // Finish workout for a day
@@ -236,7 +302,7 @@ export function useWorkoutStore() {
     async (dayId: string) => {
       if (!user) return;
       const date = editingDate || todayStr();
-      const existing = todayLogs[dayId];
+      const existing = todayLogsRef.current[dayId];
       if (!existing) return;
 
       const { error } = await supabase
@@ -251,12 +317,14 @@ export function useWorkoutStore() {
         return;
       }
 
+      const next: WorkoutLog = { ...existing, completed: true };
+      todayLogsRef.current = { ...todayLogsRef.current, [dayId]: next };
       setTodayLogs((prev) => ({
         ...prev,
         [dayId]: { ...prev[dayId], completed: true },
       }));
     },
-    [user, supabase, todayLogs, editingDate]
+    [user, supabase, editingDate]
   );
 
   // Get exercise history (last N sessions)
@@ -439,13 +507,7 @@ export function useWorkoutStore() {
         })
       );
 
-      return rows.slice(0, limit).map((log) => ({
-        id: log.id,
-        day_id: log.day_id,
-        date: log.date,
-        exercises: log.exercises as Record<string, SetLog[]>,
-        completed: log.completed,
-      }));
+      return rows.slice(0, limit).map((log) => mapWorkoutLogRow(log));
     },
     [user, supabase]
   );
@@ -465,17 +527,11 @@ export function useWorkoutStore() {
         .maybeSingle();
 
       if (data) {
-        setTodayLogs({
-          [dayId]: {
-            id: data.id,
-            user_id: data.user_id,
-            day_id: data.day_id,
-            date: data.date,
-            exercises: data.exercises as Record<string, SetLog[]>,
-            completed: data.completed,
-          },
-        });
+        const mapped = mapWorkoutLogRow(data);
+        todayLogsRef.current = { [dayId]: mapped };
+        setTodayLogs({ [dayId]: mapped });
       } else {
+        todayLogsRef.current = {};
         setTodayLogs({});
       }
 
@@ -487,8 +543,10 @@ export function useWorkoutStore() {
   // Exit history editing mode: restore today's actual logs
   const stopEditingHistory = useCallback(async () => {
     setEditingDate(null);
-    setTodayLogs(savedTodayLogs.current);
+    const restored = savedTodayLogs.current;
     savedTodayLogs.current = {};
+    todayLogsRef.current = restored;
+    setTodayLogs(restored);
     await loadTodayLogs();
   }, [loadTodayLogs]);
 
@@ -506,7 +564,7 @@ export function useWorkoutStore() {
 
       const { data: existing } = await supabase
         .from("workout_logs")
-        .select("exercises")
+        .select("exercises, completion_order")
         .eq("user_id", user.id)
         .eq("day_id", dayId)
         .eq("date", date)
@@ -522,18 +580,32 @@ export function useWorkoutStore() {
       sets[setIndex] = { weight, reps, completed: true };
       exercises[exerciseId] = sets;
 
+      const completion_order = mergeCompletionOrder(
+        parseCompletionOrder(existing.completion_order),
+        exerciseId,
+        setIndex,
+        true
+      );
+
       await supabase
         .from("workout_logs")
-        .update({ exercises })
+        .update({ exercises, completion_order })
         .eq("user_id", user.id)
         .eq("day_id", dayId)
         .eq("date", date);
 
       if (date === todayStr()) {
-        setTodayLogs((prev) => ({
-          ...prev,
-          [dayId]: { ...prev[dayId], exercises },
-        }));
+        setTodayLogs((prev) => {
+          const cur = prev[dayId];
+          if (!cur) return prev;
+          const merged: WorkoutLog = {
+            ...cur,
+            exercises,
+            completion_order,
+          };
+          todayLogsRef.current = { ...todayLogsRef.current, [dayId]: merged };
+          return { ...prev, [dayId]: merged };
+        });
       }
     },
     [user, supabase]
@@ -565,6 +637,7 @@ export function useWorkoutStore() {
     todayLogs,
     editingDate,
     saveRoutine,
+    saveSet,
     logSet,
     markExerciseComplete,
     finishWorkout,

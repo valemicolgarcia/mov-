@@ -41,7 +41,96 @@ export interface WorkoutLog {
   day_id: string;
   date: string;
   exercises: Record<string, SetLog[]>;
+  /** Claves `exerciseId:setIndex` en orden cronológico de completado. */
+  completion_order?: string[];
   completed: boolean;
+}
+
+/** Clave estable para una serie dentro del orden de completado. */
+export function completionSetKey(exerciseId: string, setIndex: number): string {
+  return `${exerciseId}:${setIndex}`;
+}
+
+export function parseCompletionSetKey(
+  key: string
+): { exerciseId: string; setIndex: number } | null {
+  const i = key.lastIndexOf(":");
+  if (i <= 0) return null;
+  const exerciseId = key.slice(0, i);
+  const setIndex = Number.parseInt(key.slice(i + 1), 10);
+  if (Number.isNaN(setIndex)) return null;
+  return { exerciseId, setIndex };
+}
+
+export function mergeCompletionOrder(
+  order: string[] | undefined,
+  exerciseId: string,
+  setIndex: number,
+  completed: boolean
+): string[] {
+  const k = completionSetKey(exerciseId, setIndex);
+  const next = (order ?? []).filter((x) => x !== k);
+  if (completed) next.push(k);
+  return next;
+}
+
+export interface ReceiptLine {
+  blockName: string;
+  exercise: Exercise;
+  setIndex: number;
+  set: SetLog;
+}
+
+/** Líneas del comprobante: orden de ejecución; no pierde series completadas aunque falte orden antiguo. */
+export function buildReceiptLines(
+  day: WorkoutDay,
+  exercises: Record<string, SetLog[]>,
+  completion_order?: string[]
+): ReceiptLine[] {
+  const exerciseMeta = new Map<string, { exercise: Exercise; blockName: string }>();
+  for (const block of day.blocks) {
+    for (const ex of block.exercises) {
+      exerciseMeta.set(ex.id, { exercise: ex, blockName: block.name });
+    }
+  }
+
+  const shown = new Set<string>();
+  const lines: ReceiptLine[] = [];
+
+  const tryAdd = (exerciseId: string, setIndex: number) => {
+    const key = completionSetKey(exerciseId, setIndex);
+    if (shown.has(key)) return;
+    const set = exercises[exerciseId]?.[setIndex];
+    if (!set?.completed) return;
+    const meta = exerciseMeta.get(exerciseId);
+    if (!meta) return;
+    shown.add(key);
+    lines.push({
+      blockName: meta.blockName,
+      exercise: meta.exercise,
+      setIndex,
+      set,
+    });
+  };
+
+  if (completion_order?.length) {
+    for (const raw of completion_order) {
+      const p = parseCompletionSetKey(raw);
+      if (p) tryAdd(p.exerciseId, p.setIndex);
+    }
+  }
+
+  for (const block of day.blocks) {
+    for (const ex of block.exercises) {
+      const sets = exercises[ex.id];
+      if (!sets) continue;
+      sets.forEach((s, i) => {
+        if (s?.completed) tryAdd(ex.id, i);
+      });
+    }
+  }
+
+  return lines;
 }
 
 /** True if the log should appear in historial / vista profesor (no solo al marcar "terminar día"). */
