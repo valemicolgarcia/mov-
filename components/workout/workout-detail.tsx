@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ArrowLeft, Clock, Flame, Check, Calendar } from "lucide-react";
 import type { WorkoutDay } from "@/lib/workout-data";
@@ -17,29 +17,6 @@ interface WorkoutDetailProps {
 export function WorkoutDetail({ day, store, onBack }: WorkoutDetailProps) {
   const [showReceipt, setShowReceipt] = useState(false);
   const isEditingHistory = !!store.editingDate;
-  const tabVisibleRefetchTimer = useRef<ReturnType<typeof setTimeout> | null>(
-    null
-  );
-
-  useEffect(() => {
-    const onVis = () => {
-      if (document.visibilityState !== "visible") return;
-      if (tabVisibleRefetchTimer.current) {
-        clearTimeout(tabVisibleRefetchTimer.current);
-      }
-      tabVisibleRefetchTimer.current = setTimeout(() => {
-        tabVisibleRefetchTimer.current = null;
-        void store.refreshDayLog(day.id);
-      }, 450);
-    };
-    document.addEventListener("visibilitychange", onVis);
-    return () => {
-      document.removeEventListener("visibilitychange", onVis);
-      if (tabVisibleRefetchTimer.current) {
-        clearTimeout(tabVisibleRefetchTimer.current);
-      }
-    };
-  }, [day.id, store.refreshDayLog]);
 
   const totalExercises = day.blocks.reduce(
     (acc, block) => acc + block.exercises.length,

@@ -79,6 +79,25 @@ export function WorkoutReceipt({
     0
   );
 
+  // Volumen total (kg) — solo sets con peso completados.
+  const totalVolume = Object.values(exercises).reduce((acc, sets) => {
+    if (!sets) return acc;
+    return (
+      acc +
+      sets.reduce((s, set) => {
+        if (!set?.completed) return s;
+        const w = Number(set.weight) || 0;
+        const r = Number(set.reps) || 0;
+        return s + w * r;
+      }, 0)
+    );
+  }, 0);
+
+  const formatVolume = (kg: number) => {
+    if (kg >= 1000) return `${(kg / 1000).toFixed(1)}t`;
+    return `${Math.round(kg)}`;
+  };
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -135,7 +154,7 @@ export function WorkoutReceipt({
               </p>
             </div>
 
-            <div className="mb-5 flex items-center justify-center gap-6 rounded-xl bg-neutral-900 p-3">
+            <div className="mb-5 flex items-center justify-center gap-5 rounded-xl bg-neutral-900 p-3">
               <div className="text-center">
                 <div className="text-2xl font-black text-orange-400">
                   {totalSetsCompleted}
@@ -153,6 +172,22 @@ export function WorkoutReceipt({
                   Bloques
                 </div>
               </div>
+              {totalVolume > 0 && (
+                <>
+                  <div className="h-8 w-px bg-neutral-800" />
+                  <div className="text-center">
+                    <div className="text-2xl font-black text-orange-400">
+                      {formatVolume(totalVolume)}
+                      <span className="text-xs">
+                        {totalVolume >= 1000 ? "" : "kg"}
+                      </span>
+                    </div>
+                    <div className="text-[10px] font-medium uppercase tracking-wider text-neutral-500">
+                      Volumen
+                    </div>
+                  </div>
+                </>
+              )}
               <div className="h-8 w-px bg-neutral-800" />
               <div className="text-center">
                 <div className="text-2xl font-black text-orange-400">

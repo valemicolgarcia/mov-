@@ -42,6 +42,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const supabase = createClient();
   const profileLoadSeq = useRef(0);
+  const lastUserIdRef = useRef<string | null>(null);
 
   const buildFallbackProfile = useCallback(
     (userId: string, u: User | null): UserProfile => {
@@ -124,6 +125,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const applySession = async (session: Session | null) => {
       const u = session?.user ?? null;
+      lastUserIdRef.current = u?.id ?? null;
       setUser(u);
       if (u) {
         try {
@@ -161,8 +163,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange((event, session) => {
       if (cancelled) return;
+      // SIGNED_OUT y USER_UPDATED sí requieren reset.
+      // El resto (TOKEN_REFRESHED, INITIAL_SESSION, SIGNED_IN al volver al tab) — si es
+      // el mismo userId, NO tocamos el state (evita re-render y cascada de useEffects
+      // que el usuario ve como "recarga" al cambiar de pestaña).
+      if (event !== "SIGNED_OUT" && event !== "USER_UPDATED") {
+        const newUid = session?.user?.id ?? null;
+        const curUid = lastUserIdRef.current;
+        if (newUid && newUid === curUid) {
+          return;
+        }
+      }
+      lastUserIdRef.current = session?.user?.id ?? null;
       void applySession(session);
     });
 

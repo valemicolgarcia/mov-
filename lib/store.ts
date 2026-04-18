@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import {
@@ -20,6 +21,23 @@ function todayStr() {
 function parseCompletionOrder(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
   return raw.filter((x): x is string => typeof x === "string");
+}
+
+/** "Score" de cuánta data tiene un log — usado para decidir si server o local gana al sincronizar. */
+function scoreLog(log: Pick<WorkoutLog, "exercises">): number {
+  let score = 0;
+  const ex = log.exercises;
+  if (!ex) return 0;
+  for (const sets of Object.values(ex)) {
+    if (!Array.isArray(sets)) continue;
+    for (const s of sets) {
+      if (!s) continue;
+      if (s.completed) score += 10;
+      if ((Number(s.weight) || 0) > 0) score += 3;
+      if ((Number(s.reps) || 0) > 0) score += 3;
+    }
+  }
+  return score;
 }
 
 function mapWorkoutLogRow(log: {
@@ -42,6 +60,45 @@ function mapWorkoutLogRow(log: {
   };
 }
 
+// Persistencia de sesión: sobrevive al cambio de tab y re-mounts del provider.
+// Clave distinta por usuario para no mezclar datos entre cuentas.
+const SESSION_KEY_PREFIX = "mov:session:";
+function sessionKey(userId: string) {
+  return `${SESSION_KEY_PREFIX}${userId}`;
+}
+
+interface PersistedSession {
+  todayLogs: Record<string, WorkoutLog>;
+  editingDate: string | null;
+  /** Día (YYYY-MM-DD) al que corresponden estos todayLogs; si el usuario vuelve otro día, se descarta. */
+  todayDate: string;
+}
+
+function loadPersisted(userId: string): PersistedSession | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(sessionKey(userId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PersistedSession;
+    // Si cambió el día, descartamos los todayLogs (no editingDate, podría estar editando historial).
+    if (parsed.editingDate == null && parsed.todayDate !== todayStr()) {
+      return { ...parsed, todayLogs: {} };
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function savePersisted(userId: string, s: PersistedSession) {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(sessionKey(userId), JSON.stringify(s));
+  } catch {
+    /* quota / disabled */
+  }
+}
+
 export function useWorkoutStore() {
   const { user } = useAuth();
   const supabase = createClient();
@@ -54,6 +111,10 @@ export function useWorkoutStore() {
   const todayLogsRef = useRef<Record<string, WorkoutLog>>({});
   /** Fecha del log que estamos editando (historial); sincronizada antes que React state para saveSet/loads. */
   const editingDateRef = useRef<string | null>(null);
+  /** Cola por dayId — encadena upserts para evitar race conditions (lost updates). */
+  const saveQueueRef = useRef<Record<string, Promise<void>>>({});
+  /** Ya intentamos hidratar desde sessionStorage (una vez por mount). */
+  const hydratedRef = useRef(false);
 
   useEffect(() => {
     todayLogsRef.current = todayLogs;
@@ -63,6 +124,35 @@ export function useWorkoutStore() {
     editingDateRef.current = editingDate;
   }, [editingDate]);
 
+  // Hidratar desde sessionStorage al montar (o al cambiar de usuario).
+  useEffect(() => {
+    if (!user) {
+      hydratedRef.current = false;
+      return;
+    }
+    if (hydratedRef.current) return;
+    const persisted = loadPersisted(user.id);
+    if (persisted) {
+      todayLogsRef.current = persisted.todayLogs;
+      setTodayLogs(persisted.todayLogs);
+      if (persisted.editingDate) {
+        editingDateRef.current = persisted.editingDate;
+        setEditingDate(persisted.editingDate);
+      }
+    }
+    hydratedRef.current = true;
+  }, [user]);
+
+  // Persistir cambios en todayLogs / editingDate.
+  useEffect(() => {
+    if (!user || !hydratedRef.current) return;
+    savePersisted(user.id, {
+      todayLogs,
+      editingDate,
+      todayDate: todayStr(),
+    });
+  }, [user, todayLogs, editingDate]);
+
   const activeLogDate = useCallback(() => {
     return editingDateRef.current ?? todayStr();
   }, []);
@@ -70,20 +160,32 @@ export function useWorkoutStore() {
   // Load routine from Supabase
   const loadRoutine = useCallback(async () => {
     if (!user) return;
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("routines")
       .select("data")
       .eq("user_id", user.id)
-      .single();
+      .maybeSingle();
+
+    if (error) {
+      console.error("[routines] loadRoutine:", error.message);
+      toast.error("No se pudo cargar tu rutina", { description: error.message });
+      return;
+    }
 
     if (data) {
       setRoutine(data.data as WorkoutDay[]);
     } else {
-      // First time: seed with example data
-      await supabase.from("routines").insert({
+      const { error: insertError } = await supabase.from("routines").insert({
         user_id: user.id,
         data: seedWorkoutDays,
       });
+      if (insertError) {
+        console.error("[routines] seed:", insertError.message);
+        toast.error("No se pudo inicializar tu rutina", {
+          description: insertError.message,
+        });
+        return;
+      }
       setRoutine(seedWorkoutDays);
     }
   }, [user, supabase]);
@@ -108,10 +210,39 @@ export function useWorkoutStore() {
     (data ?? []).forEach((log) => {
       logsMap[log.day_id] = mapWorkoutLogRow(log);
     });
-    setTodayLogs(logsMap);
+    // Merge: preservar datos locales si son más "ricos" que los del server.
+    // "Más ricos" = más sets con peso/reps/completed. Esto evita que al volver al tab
+    // el server (con datos viejos aún no sincronizados) pise lo que el usuario acaba de escribir.
+    setTodayLogs((prev) => {
+      const merged: Record<string, WorkoutLog> = { ...prev };
+      for (const [dayId, serverLog] of Object.entries(logsMap)) {
+        const localLog = merged[dayId];
+        if (!localLog) {
+          merged[dayId] = serverLog;
+          continue;
+        }
+        // Si el server confirmó completed=true o tiene id (row real), tiene autoridad en esos campos,
+        // pero preservamos los exercises locales si tienen más data.
+        const localScore = scoreLog(localLog);
+        const serverScore = scoreLog(serverLog);
+        merged[dayId] = {
+          ...serverLog,
+          ...(localScore > serverScore
+            ? {
+                exercises: localLog.exercises,
+                completion_order: localLog.completion_order,
+              }
+            : {}),
+          // `completed` del server siempre gana (es una acción explícita que requiere upsert separado).
+          completed: serverLog.completed,
+        };
+      }
+      todayLogsRef.current = merged;
+      return merged;
+    });
   }, [user, supabase]);
 
-  /** Un solo día (fecha = entreno actual o historial). Refresco al volver a la pestaña para mostrar borradores guardados. */
+  /** Un solo día (fecha = entreno actual o historial). */
   const refreshDayLog = useCallback(
     async (dayId: string) => {
       if (!user) return;
@@ -157,27 +288,47 @@ export function useWorkoutStore() {
     };
   }, [user, loadRoutine, loadTodayLogs]);
 
-  // No recargar workout_logs al volver a la pestaña: el fetch podía traer datos viejos antes del upsert
-  // y ExerciseRow pisaba los inputs. El estado sigue en memoria; saveSet persiste en Supabase.
-
   // Save full routine
   const saveRoutine = useCallback(
     async (days: WorkoutDay[]) => {
       if (!user) return;
       setRoutine(days);
-      await supabase
+      const { error } = await supabase
         .from("routines")
         .upsert(
           { user_id: user.id, data: days, updated_at: new Date().toISOString() },
           { onConflict: "user_id" }
         );
+      if (error) {
+        console.error("[routines] saveRoutine:", error.message);
+        toast.error("No se pudo guardar la rutina", {
+          description: error.message,
+        });
+      }
     },
     [user, supabase]
   );
 
-  /** Guarda una serie (peso/reps) y si está completada; evita pisar otros ejercicios usando el último estado en ref. */
-  const saveSet = useCallback(
-    async (
+  /** Encola una operación de guardado por día — evita concurrencia que pisa el JSON `exercises`. */
+  const enqueueSave = useCallback(
+    (dayId: string, task: () => Promise<void>): Promise<void> => {
+      const prev = saveQueueRef.current[dayId] ?? Promise.resolve();
+      const next = prev.catch(() => {}).then(task);
+      saveQueueRef.current[dayId] = next;
+      // Limpieza: si esta es la última, borrá la referencia al terminar.
+      next.finally(() => {
+        if (saveQueueRef.current[dayId] === next) {
+          delete saveQueueRef.current[dayId];
+        }
+      });
+      return next;
+    },
+    []
+  );
+
+  /** Update optimístico local (sin Supabase). Llamado en cada keystroke para que sessionStorage tenga el dato antes del debounce. */
+  const updateSetLocal = useCallback(
+    (
       dayId: string,
       exerciseId: string,
       setIndex: number,
@@ -206,7 +357,8 @@ export function useWorkoutStore() {
         completed
       );
 
-      const logData = {
+      const next: WorkoutLog = {
+        ...existing,
         user_id: user.id,
         day_id: dayId,
         date,
@@ -214,33 +366,90 @@ export function useWorkoutStore() {
         completion_order,
         completed: existing?.completed ?? false,
       };
+      todayLogsRef.current = { ...todayLogsRef.current, [dayId]: next };
+      setTodayLogs((prev) => ({ ...prev, [dayId]: next }));
+    },
+    [user, activeLogDate]
+  );
 
-      const optimistic: WorkoutLog = {
-        ...existing,
-        ...logData,
-        id: existing?.id,
-        user_id: user.id,
-      };
-      todayLogsRef.current = { ...todayLogsRef.current, [dayId]: optimistic };
-      setTodayLogs((prev) => ({ ...prev, [dayId]: optimistic }));
+  /** Guarda una serie (peso/reps) y si está completada; evita pisar otros ejercicios usando el último estado en ref. */
+  const saveSet = useCallback(
+    async (
+      dayId: string,
+      exerciseId: string,
+      setIndex: number,
+      weight: number,
+      reps: number,
+      completed: boolean
+    ) => {
+      if (!user) return;
+      return enqueueSave(dayId, async () => {
+        const date = activeLogDate();
+        const existing = todayLogsRef.current[dayId];
+        const exercises: Record<string, SetLog[]> = existing?.exercises
+          ? { ...existing.exercises }
+          : {};
+        if (!exercises[exerciseId]) exercises[exerciseId] = [];
+        const sets = [...exercises[exerciseId]];
+        while (sets.length <= setIndex) {
+          sets.push({ weight: 0, reps: 0, completed: false });
+        }
+        sets[setIndex] = { weight, reps, completed };
+        exercises[exerciseId] = sets;
 
-      const { data, error } = await supabase
-        .from("workout_logs")
-        .upsert(logData, { onConflict: "user_id,day_id,date" })
-        .select()
-        .single();
+        const completion_order = mergeCompletionOrder(
+          existing?.completion_order,
+          exerciseId,
+          setIndex,
+          completed
+        );
 
-      if (error) {
-        console.error("[workout_logs] saveSet:", error.message);
-        return;
-      }
-      if (data) {
+        const logData = {
+          user_id: user.id,
+          day_id: dayId,
+          date,
+          exercises,
+          completion_order,
+          completed: existing?.completed ?? false,
+        };
+
+        const optimistic: WorkoutLog = {
+          ...existing,
+          ...logData,
+          id: existing?.id,
+          user_id: user.id,
+        };
+        todayLogsRef.current = { ...todayLogsRef.current, [dayId]: optimistic };
+        setTodayLogs((prev) => ({ ...prev, [dayId]: optimistic }));
+
+        const { data, error } = await supabase
+          .from("workout_logs")
+          .upsert(logData, { onConflict: "user_id,day_id,date" })
+          .select()
+          .single();
+
+        if (error) {
+          console.error("[workout_logs] saveSet:", error.message);
+          toast.error("No se guardó la serie", {
+            description: error.message,
+            id: `save-error-${dayId}`,
+          });
+          return;
+        }
+        if (!data) {
+          console.error("[workout_logs] saveSet: respuesta vacía (RLS?)");
+          toast.error("No se guardó la serie", {
+            description: "El servidor no confirmó la escritura. Revisá tu conexión.",
+            id: `save-error-${dayId}`,
+          });
+          return;
+        }
         const mapped = mapWorkoutLogRow(data);
         todayLogsRef.current = { ...todayLogsRef.current, [dayId]: mapped };
         setTodayLogs((prev) => ({ ...prev, [dayId]: mapped }));
-      }
+      });
     },
-    [user, supabase, activeLogDate]
+    [user, supabase, activeLogDate, enqueueSave]
   );
 
   const logSet = useCallback(
@@ -257,104 +466,131 @@ export function useWorkoutStore() {
   const markExerciseComplete = useCallback(
     async (dayId: string, exerciseId: string, completed: boolean, setIndex = 0) => {
       if (!user) return;
-      const date = activeLogDate();
-      const existing = todayLogsRef.current[dayId];
-      const exercises: Record<string, SetLog[]> = existing?.exercises
-        ? { ...existing.exercises }
-        : {};
-      if (!exercises[exerciseId]) exercises[exerciseId] = [];
-      const sets = [...exercises[exerciseId]];
-      while (sets.length <= setIndex) {
-        sets.push({ weight: 0, reps: 0, completed: false });
-      }
-      sets[setIndex] = { weight: 0, reps: 0, completed };
-      exercises[exerciseId] = sets;
+      return enqueueSave(dayId, async () => {
+        const date = activeLogDate();
+        const existing = todayLogsRef.current[dayId];
+        const exercises: Record<string, SetLog[]> = existing?.exercises
+          ? { ...existing.exercises }
+          : {};
+        if (!exercises[exerciseId]) exercises[exerciseId] = [];
+        const sets = [...exercises[exerciseId]];
+        while (sets.length <= setIndex) {
+          sets.push({ weight: 0, reps: 0, completed: false });
+        }
+        // Preservar weight/reps si ya había (para timer/checklist son 0; para normales no se llama desde acá).
+        const prev = sets[setIndex];
+        sets[setIndex] = {
+          weight: prev?.weight ?? 0,
+          reps: prev?.reps ?? 0,
+          completed,
+        };
+        exercises[exerciseId] = sets;
 
-      const completion_order = mergeCompletionOrder(
-        existing?.completion_order,
-        exerciseId,
-        setIndex,
-        completed
-      );
+        const completion_order = mergeCompletionOrder(
+          existing?.completion_order,
+          exerciseId,
+          setIndex,
+          completed
+        );
 
-      const logData = {
-        user_id: user.id,
-        day_id: dayId,
-        date,
-        exercises,
-        completion_order,
-        completed: existing?.completed ?? false,
-      };
+        const logData = {
+          user_id: user.id,
+          day_id: dayId,
+          date,
+          exercises,
+          completion_order,
+          completed: existing?.completed ?? false,
+        };
 
-      const optimistic: WorkoutLog = {
-        ...existing,
-        ...logData,
-        id: existing?.id,
-        user_id: user.id,
-      };
-      todayLogsRef.current = { ...todayLogsRef.current, [dayId]: optimistic };
-      setTodayLogs((prev) => ({ ...prev, [dayId]: optimistic }));
+        const optimistic: WorkoutLog = {
+          ...existing,
+          ...logData,
+          id: existing?.id,
+          user_id: user.id,
+        };
+        todayLogsRef.current = { ...todayLogsRef.current, [dayId]: optimistic };
+        setTodayLogs((prev) => ({ ...prev, [dayId]: optimistic }));
 
-      const { data, error } = await supabase
-        .from("workout_logs")
-        .upsert(logData, { onConflict: "user_id,day_id,date" })
-        .select()
-        .single();
+        const { data, error } = await supabase
+          .from("workout_logs")
+          .upsert(logData, { onConflict: "user_id,day_id,date" })
+          .select()
+          .single();
 
-      if (error) {
-        console.error("[workout_logs] markExerciseComplete:", error.message);
-        return;
-      }
-      if (data) {
+        if (error) {
+          console.error("[workout_logs] markExerciseComplete:", error.message);
+          toast.error("No se marcó como completado", {
+            description: error.message,
+            id: `complete-error-${dayId}`,
+          });
+          return;
+        }
+        if (!data) {
+          console.error("[workout_logs] markExerciseComplete: respuesta vacía");
+          toast.error("No se marcó como completado", {
+            description: "El servidor no confirmó la escritura.",
+            id: `complete-error-${dayId}`,
+          });
+          return;
+        }
         const mapped = mapWorkoutLogRow(data);
         todayLogsRef.current = { ...todayLogsRef.current, [dayId]: mapped };
         setTodayLogs((prev) => ({ ...prev, [dayId]: mapped }));
-      }
+      });
     },
-    [user, supabase, activeLogDate]
+    [user, supabase, activeLogDate, enqueueSave]
   );
 
-  // Finish workout for a day
+  // Finish workout for a day — esperamos la cola primero para no pisar cambios pendientes.
   const finishWorkout = useCallback(
     async (dayId: string) => {
       if (!user) return;
-      const date = activeLogDate();
-      const existing = todayLogsRef.current[dayId];
-      if (!existing) return;
+      return enqueueSave(dayId, async () => {
+        const date = activeLogDate();
+        const existing = todayLogsRef.current[dayId];
+        if (!existing) return;
 
-      const { error } = await supabase
-        .from("workout_logs")
-        .update({ completed: true })
-        .eq("user_id", user.id)
-        .eq("day_id", dayId)
-        .eq("date", date);
+        const { error } = await supabase
+          .from("workout_logs")
+          .update({ completed: true })
+          .eq("user_id", user.id)
+          .eq("day_id", dayId)
+          .eq("date", date);
 
-      if (error) {
-        console.error("[workout_logs] finishWorkout:", error.message);
-        return;
-      }
+        if (error) {
+          console.error("[workout_logs] finishWorkout:", error.message);
+          toast.error("No se pudo finalizar el entrenamiento", {
+            description: error.message,
+          });
+          return;
+        }
 
-      const next: WorkoutLog = { ...existing, completed: true };
-      todayLogsRef.current = { ...todayLogsRef.current, [dayId]: next };
-      setTodayLogs((prev) => ({
-        ...prev,
-        [dayId]: { ...prev[dayId], completed: true },
-      }));
+        const next: WorkoutLog = { ...existing, completed: true };
+        todayLogsRef.current = { ...todayLogsRef.current, [dayId]: next };
+        setTodayLogs((prev) => ({
+          ...prev,
+          [dayId]: { ...prev[dayId], completed: true },
+        }));
+      });
     },
-    [user, supabase, activeLogDate]
+    [user, supabase, activeLogDate, enqueueSave]
   );
 
   // Get exercise history (last N sessions)
   const getExerciseHistory = useCallback(
     async (exerciseId: string, limit = 10) => {
       if (!user) return [];
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("workout_logs")
         .select("date, exercises")
         .eq("user_id", user.id)
         .order("date", { ascending: false })
         .limit(50);
 
+      if (error) {
+        console.error("[workout_logs] getExerciseHistory:", error.message);
+        return [];
+      }
       if (!data) return [];
 
       const history: { date: string; sets: SetLog[] }[] = [];
@@ -374,7 +610,7 @@ export function useWorkoutStore() {
   const getLastSession = useCallback(
     async (exerciseId: string): Promise<SetLog[] | null> => {
       if (!user) return null;
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("workout_logs")
         .select("exercises")
         .eq("user_id", user.id)
@@ -382,6 +618,10 @@ export function useWorkoutStore() {
         .order("date", { ascending: false })
         .limit(20);
 
+      if (error) {
+        console.error("[workout_logs] getLastSession:", error.message);
+        return null;
+      }
       if (!data) return null;
 
       for (const log of data) {
@@ -473,6 +713,7 @@ export function useWorkoutStore() {
       }
       if (error) {
         console.error("[workout_logs] delete:", error.message);
+        toast.error("No se pudo borrar la sesión", { description: error.message });
         return { error: error.message };
       }
       if (log.date === todayStr()) {
@@ -493,6 +734,9 @@ export function useWorkoutStore() {
         .eq("user_id", user.id);
       if (error) {
         console.error("[extra_sessions] delete:", error.message);
+        toast.error("No se pudo borrar la actividad", {
+          description: error.message,
+        });
         return { error: error.message };
       }
       return { error: null };
@@ -500,7 +744,7 @@ export function useWorkoutStore() {
     [user, supabase]
   );
 
-  // Get full workout history (all past sessions)
+  // Get full workout history (all past sessions) — filtra borradores sin sets completados.
   const getWorkoutHistory = useCallback(
     async (limit = 30) => {
       if (!user) return [];
@@ -537,13 +781,18 @@ export function useWorkoutStore() {
       editingDateRef.current = date;
       setEditingDate(date);
 
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("workout_logs")
         .select("*")
         .eq("user_id", user.id)
         .eq("day_id", dayId)
         .eq("date", date)
         .maybeSingle();
+
+      if (error) {
+        console.error("[workout_logs] startEditingHistory:", error.message);
+        toast.error("No se pudo cargar la sesión", { description: error.message });
+      }
 
       if (data) {
         const mapped = mapWorkoutLogRow(data);
@@ -580,14 +829,21 @@ export function useWorkoutStore() {
     ) => {
       if (!user) return;
 
-      const { data: existing } = await supabase
+      const { data: existing, error: selectError } = await supabase
         .from("workout_logs")
         .select("exercises, completion_order")
         .eq("user_id", user.id)
         .eq("day_id", dayId)
         .eq("date", date)
-        .single();
+        .maybeSingle();
 
+      if (selectError) {
+        console.error("[workout_logs] updateHistoryLog select:", selectError.message);
+        toast.error("No se pudo cargar la sesión", {
+          description: selectError.message,
+        });
+        return;
+      }
       if (!existing) return;
 
       const exercises = {
@@ -605,12 +861,20 @@ export function useWorkoutStore() {
         true
       );
 
-      await supabase
+      const { error: updateError } = await supabase
         .from("workout_logs")
         .update({ exercises, completion_order })
         .eq("user_id", user.id)
         .eq("day_id", dayId)
         .eq("date", date);
+
+      if (updateError) {
+        console.error("[workout_logs] updateHistoryLog update:", updateError.message);
+        toast.error("No se pudo actualizar la sesión", {
+          description: updateError.message,
+        });
+        return;
+      }
 
       if (date === todayStr()) {
         setTodayLogs((prev) => {
@@ -656,6 +920,7 @@ export function useWorkoutStore() {
     editingDate,
     saveRoutine,
     saveSet,
+    updateSetLocal,
     logSet,
     markExerciseComplete,
     finishWorkout,

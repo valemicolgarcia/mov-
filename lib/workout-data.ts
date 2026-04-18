@@ -140,7 +140,19 @@ export function workoutLogHasActivity(
   if (log.completed) return true;
   const ex = log.exercises;
   if (!ex || typeof ex !== "object") return false;
-  return Object.keys(ex).length > 0;
+  // Solo cuenta como actividad si hay al menos una serie con peso/reps o marcada como completada.
+  // Esto filtra "borradores" vacíos creados por saveSet sin que el usuario ingrese nada real.
+  for (const sets of Object.values(ex)) {
+    if (!Array.isArray(sets)) continue;
+    for (const set of sets) {
+      if (!set) continue;
+      if (set.completed) return true;
+      const w = Number(set.weight) || 0;
+      const r = Number(set.reps) || 0;
+      if (w > 0 || r > 0) return true;
+    }
+  }
+  return false;
 }
 
 export const seedWorkoutDays: WorkoutDay[] = [

@@ -18,6 +18,7 @@ import {
   Loader2,
 } from "lucide-react";
 import type { WorkoutDay, WorkoutLog, SetLog } from "@/lib/workout-data";
+import { buildReceiptLines } from "@/lib/workout-data";
 import type { useWorkoutStore } from "@/lib/store";
 import { WorkoutReceipt } from "./workout-receipt";
 import { localDateStr } from "@/lib/date-utils";
@@ -420,44 +421,103 @@ export function WorkoutHistory({
                                   )}
                                 </div>
 
-                                {/* Exercises summary */}
-                                <div className="space-y-2">
-                                  {Object.entries(log.exercises).map(
-                                    ([exId, sets]) => {
-                                      const hasWeights = sets.some(
-                                        (s) => s?.weight > 0
-                                      );
-
-                                      return (
-                                        <div
-                                          key={exId}
-                                          className="rounded-xl bg-secondary/50 p-3"
-                                        >
-                                          <h4 className="text-sm font-semibold text-foreground">
-                                            {getExerciseName(log.day_id, exId)}
-                                          </h4>
-                                          {hasWeights ? (
-                                            <div className="mt-1.5 flex flex-wrap gap-1.5">
-                                              {sets
-                                                .filter((s) => s?.completed)
-                                                .map((set, i) => (
-                                                  <span
-                                                    key={i}
-                                                    className="rounded-md bg-background px-2.5 py-1 text-xs font-medium text-foreground"
-                                                  >
-                                                    {set.weight}kg × {set.reps}
-                                                  </span>
-                                                ))}
+                                {/* Exercises summary — orden de ejecución, agrupado por bloque */}
+                                <div className="space-y-1">
+                                  {(() => {
+                                    if (!dayInfo) {
+                                      // Fallback si la rutina ya no tiene ese día: render por orden de inserción.
+                                      return Object.entries(log.exercises)
+                                        .filter(([, sets]) =>
+                                          sets.some((s) => s?.completed)
+                                        )
+                                        .map(([exId, sets]) => {
+                                          const done = sets.filter(
+                                            (s) => s?.completed && s.weight > 0
+                                          );
+                                          return (
+                                            <div
+                                              key={exId}
+                                              className="rounded-xl bg-secondary/50 p-3"
+                                            >
+                                              <h4 className="text-sm font-semibold text-foreground">
+                                                {getExerciseName(log.day_id, exId)}
+                                              </h4>
+                                              {done.length > 0 ? (
+                                                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                                                  {done.map((set, i) => (
+                                                    <span
+                                                      key={i}
+                                                      className="rounded-md bg-background px-2.5 py-1 text-xs font-medium text-foreground"
+                                                    >
+                                                      {set.weight}kg × {set.reps}
+                                                    </span>
+                                                  ))}
+                                                </div>
+                                              ) : (
+                                                <p className="mt-1 text-xs text-primary">
+                                                  Completado
+                                                </p>
+                                              )}
                                             </div>
-                                          ) : (
-                                            <p className="mt-1 text-xs text-primary">
-                                              Completado
-                                            </p>
-                                          )}
-                                        </div>
+                                          );
+                                        });
+                                    }
+
+                                    const lines = buildReceiptLines(
+                                      dayInfo,
+                                      log.exercises,
+                                      log.completion_order
+                                    );
+                                    if (lines.length === 0) {
+                                      return (
+                                        <p className="text-xs text-muted-foreground">
+                                          Sin series completadas.
+                                        </p>
                                       );
                                     }
-                                  )}
+                                    return lines.map((item, idx) => {
+                                      const showBlock =
+                                        idx === 0 ||
+                                        item.blockName !== lines[idx - 1]!.blockName;
+                                      const { exercise, setIndex, set } = item;
+                                      const isWeight =
+                                        !exercise.isChecklist &&
+                                        !exercise.isTimeBased;
+                                      const roundLabel =
+                                        exercise.sets > 1 || setIndex > 0
+                                          ? ` · S${setIndex + 1}`
+                                          : "";
+                                      return (
+                                        <div key={`${exercise.id}-${setIndex}-${idx}`}>
+                                          {showBlock && (
+                                            <div className="mb-1 mt-3 flex items-center gap-2 first:mt-0">
+                                              <div className="h-1.5 w-1.5 rounded-full bg-primary" />
+                                              <h3 className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+                                                {item.blockName}
+                                              </h3>
+                                            </div>
+                                          )}
+                                          <div className="flex items-center justify-between rounded-lg bg-secondary/40 px-3 py-1.5">
+                                            <span className="text-sm text-foreground">
+                                              {exercise.name}
+                                              <span className="text-muted-foreground">
+                                                {roundLabel}
+                                              </span>
+                                            </span>
+                                            {isWeight ? (
+                                              <span className="text-xs font-semibold text-foreground tabular-nums">
+                                                {set.weight}kg × {set.reps}
+                                              </span>
+                                            ) : (
+                                              <span className="text-xs font-medium text-primary">
+                                                Completado
+                                              </span>
+                                            )}
+                                          </div>
+                                        </div>
+                                      );
+                                    });
+                                  })()}
                                 </div>
                               </div>
                             </motion.div>

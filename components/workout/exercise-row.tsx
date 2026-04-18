@@ -44,6 +44,8 @@ export function ExerciseRow({ exercise, setIndex, dayId, store, roundLabel }: Ex
   const inputsFocusedRef = useRef(false);
   /** Hay edición local que aún no coincide con lo último del servidor (evita pisar con datos viejos al re-fetch). */
   const pendingLocalRef = useRef(false);
+  /** Hay al menos una escritura en vuelo — no sincronizar UI desde savedSnap hasta que termine. */
+  const inFlightRef = useRef(0);
   const isCheckedRef = useRef(isChecked);
   isCheckedRef.current = isChecked;
   const weightRef = useRef(weight);
@@ -69,6 +71,8 @@ export function ExerciseRow({ exercise, setIndex, dayId, store, roundLabel }: Ex
 
   useEffect(() => {
     if (inputsFocusedRef.current) return;
+    // Si hay al menos una escritura en vuelo, no sincronices desde el server (evita titilo del tic).
+    if (inFlightRef.current > 0) return;
     if (pendingLocalRef.current && !localMatchesSaved()) return;
     if (localMatchesSaved()) pendingLocalRef.current = false;
     setWeight(savedSet?.weight ? String(savedSet.weight) : "");
@@ -86,14 +90,12 @@ export function ExerciseRow({ exercise, setIndex, dayId, store, roundLabel }: Ex
     const sc = savedSet?.completed ?? false;
     if (w === sw && r === sr && isCheckedRef.current === sc) return;
     const t = setTimeout(() => {
-      void store.saveSet(
-        dayId,
-        exercise.id,
-        setIndex,
-        w,
-        r,
-        isCheckedRef.current
-      );
+      inFlightRef.current += 1;
+      void store
+        .saveSet(dayId, exercise.id, setIndex, w, r, isCheckedRef.current)
+        .finally(() => {
+          inFlightRef.current = Math.max(0, inFlightRef.current - 1);
+        });
     }, 200);
     return () => clearTimeout(t);
   }, [
@@ -114,7 +116,12 @@ export function ExerciseRow({ exercise, setIndex, dayId, store, roundLabel }: Ex
       if (document.visibilityState !== "hidden") return;
       const w = parseFloat(weightRef.current) || 0;
       const r = parseInt(repsRef.current, 10) || 0;
-      void store.saveSet(dayId, exercise.id, setIndex, w, r, isCheckedRef.current);
+      inFlightRef.current += 1;
+      void store
+        .saveSet(dayId, exercise.id, setIndex, w, r, isCheckedRef.current)
+        .finally(() => {
+          inFlightRef.current = Math.max(0, inFlightRef.current - 1);
+        });
     };
     document.addEventListener("visibilitychange", flush);
     window.addEventListener("pagehide", flush);
@@ -130,6 +137,7 @@ export function ExerciseRow({ exercise, setIndex, dayId, store, roundLabel }: Ex
     return () => {
       const w = parseFloat(weightRef.current) || 0;
       const r = parseInt(repsRef.current, 10) || 0;
+      // No incrementamos inFlightRef acá — el componente se está desmontando.
       void store.saveSet(dayId, exercise.id, setIndex, w, r, isCheckedRef.current);
     };
   }, [dayId, exercise.id, setIndex, exercise.isChecklist, exercise.isTimeBased, store.saveSet]);
@@ -162,7 +170,12 @@ export function ExerciseRow({ exercise, setIndex, dayId, store, roundLabel }: Ex
     } else if (timeLeft === 0 && isRunning) {
       setIsRunning(false);
       setIsChecked(true);
-      store.markExerciseComplete(dayId, exercise.id, true, setIndex);
+      inFlightRef.current += 1;
+      void store
+        .markExerciseComplete(dayId, exercise.id, true, setIndex)
+        .finally(() => {
+          inFlightRef.current = Math.max(0, inFlightRef.current - 1);
+        });
     }
     return () => clearInterval(interval);
   }, [isRunning, timeLeft, dayId, exercise.id, store.markExerciseComplete]);
@@ -182,19 +195,18 @@ export function ExerciseRow({ exercise, setIndex, dayId, store, roundLabel }: Ex
   const adjustValue = (
     current: string,
     delta: number,
-    setter: (val: string) => void
+    setter: (val: string) => void,
+    field: "weight" | "reps"
   ) => {
     pendingLocalRef.current = true;
     const num = parseFloat(current) || 0;
     const newVal = Math.max(0, num + delta);
     setter(newVal.toString());
-  };
-
-  const flushDraftNow = useCallback(() => {
-    if (exercise.isChecklist || exercise.isTimeBased) return;
-    const w = parseFloat(weightRef.current) || 0;
-    const r = parseInt(repsRef.current, 10) || 0;
-    void store.saveSet(
+    // Persistir inmediatamente: el useState tarda un tick, así que calculamos w/r acá.
+    const w = field === "weight" ? newVal : parseFloat(weightRef.current) || 0;
+    const r =
+      field === "reps" ? newVal : parseInt(repsRef.current, 10) || 0;
+    store.updateSetLocal(
       dayId,
       exercise.id,
       setIndex,
@@ -202,6 +214,18 @@ export function ExerciseRow({ exercise, setIndex, dayId, store, roundLabel }: Ex
       r,
       isCheckedRef.current
     );
+  };
+
+  const flushDraftNow = useCallback(() => {
+    if (exercise.isChecklist || exercise.isTimeBased) return;
+    const w = parseFloat(weightRef.current) || 0;
+    const r = parseInt(repsRef.current, 10) || 0;
+    inFlightRef.current += 1;
+    void store
+      .saveSet(dayId, exercise.id, setIndex, w, r, isCheckedRef.current)
+      .finally(() => {
+        inFlightRef.current = Math.max(0, inFlightRef.current - 1);
+      });
   }, [
     dayId,
     exercise.id,
@@ -214,14 +238,23 @@ export function ExerciseRow({ exercise, setIndex, dayId, store, roundLabel }: Ex
   const handleComplete = () => {
     const newChecked = !isChecked;
     setIsChecked(newChecked);
+    inFlightRef.current += 1;
 
     if (exercise.isChecklist || exercise.isTimeBased) {
-      store.markExerciseComplete(dayId, exercise.id, newChecked, setIndex);
+      void store
+        .markExerciseComplete(dayId, exercise.id, newChecked, setIndex)
+        .finally(() => {
+          inFlightRef.current = Math.max(0, inFlightRef.current - 1);
+        });
     } else {
       pendingLocalRef.current = true;
       const w = parseFloat(weight) || 0;
       const r = parseInt(reps, 10) || 0;
-      void store.saveSet(dayId, exercise.id, setIndex, w, r, newChecked);
+      void store
+        .saveSet(dayId, exercise.id, setIndex, w, r, newChecked)
+        .finally(() => {
+          inFlightRef.current = Math.max(0, inFlightRef.current - 1);
+        });
     }
   };
 
@@ -323,13 +356,13 @@ export function ExerciseRow({ exercise, setIndex, dayId, store, roundLabel }: Ex
         }`}
       >
         <div
-          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-lg border-2 transition-all ${
+          className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border-2 transition-all ${
             isChecked
               ? "border-primary bg-primary"
               : "border-muted-foreground/30"
           }`}
         >
-          {isChecked && <Check className="h-4 w-4 text-primary-foreground" />}
+          {isChecked && <Check className="h-5 w-5 text-primary-foreground" />}
         </div>
         <div className="flex-1">
           <h4
@@ -416,7 +449,7 @@ export function ExerciseRow({ exercise, setIndex, dayId, store, roundLabel }: Ex
             </label>
             <div className="flex items-center gap-1">
               <button
-                onClick={() => adjustValue(weight, -2.5, setWeight)}
+                onClick={() => adjustValue(weight, -2.5, setWeight, "weight")}
                 className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-background text-muted-foreground transition-colors hover:bg-primary hover:text-primary-foreground active:scale-95"
               >
                 <Minus className="h-4 w-4" />
@@ -428,6 +461,18 @@ export function ExerciseRow({ exercise, setIndex, dayId, store, roundLabel }: Ex
                 onChange={(e) => {
                   pendingLocalRef.current = true;
                   setWeight(e.target.value);
+                  // Persistencia inmediata a sessionStorage (sin upsert) — evita perder el dato
+                  // si el usuario cambia de tab antes del debounce de 200ms.
+                  const w = parseFloat(e.target.value) || 0;
+                  const r = parseInt(repsRef.current, 10) || 0;
+                  store.updateSetLocal(
+                    dayId,
+                    exercise.id,
+                    setIndex,
+                    w,
+                    r,
+                    isCheckedRef.current
+                  );
                 }}
                 onFocus={() => {
                   inputsFocusedRef.current = true;
@@ -440,7 +485,7 @@ export function ExerciseRow({ exercise, setIndex, dayId, store, roundLabel }: Ex
                 className="h-10 w-full rounded-lg bg-background px-3 text-center text-lg font-bold tabular-nums text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary"
               />
               <button
-                onClick={() => adjustValue(weight, 2.5, setWeight)}
+                onClick={() => adjustValue(weight, 2.5, setWeight, "weight")}
                 className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-background text-muted-foreground transition-colors hover:bg-primary hover:text-primary-foreground active:scale-95"
               >
                 <Plus className="h-4 w-4" />
@@ -455,7 +500,7 @@ export function ExerciseRow({ exercise, setIndex, dayId, store, roundLabel }: Ex
             </label>
             <div className="flex items-center gap-1">
               <button
-                onClick={() => adjustValue(reps, -1, setReps)}
+                onClick={() => adjustValue(reps, -1, setReps, "reps")}
                 className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-background text-muted-foreground transition-colors hover:bg-primary hover:text-primary-foreground active:scale-95"
               >
                 <Minus className="h-4 w-4" />
@@ -467,6 +512,16 @@ export function ExerciseRow({ exercise, setIndex, dayId, store, roundLabel }: Ex
                 onChange={(e) => {
                   pendingLocalRef.current = true;
                   setReps(e.target.value);
+                  const w = parseFloat(weightRef.current) || 0;
+                  const r = parseInt(e.target.value, 10) || 0;
+                  store.updateSetLocal(
+                    dayId,
+                    exercise.id,
+                    setIndex,
+                    w,
+                    r,
+                    isCheckedRef.current
+                  );
                 }}
                 onFocus={() => {
                   inputsFocusedRef.current = true;
@@ -479,7 +534,7 @@ export function ExerciseRow({ exercise, setIndex, dayId, store, roundLabel }: Ex
                 className="h-10 w-full rounded-lg bg-background px-3 text-center text-lg font-bold tabular-nums text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary"
               />
               <button
-                onClick={() => adjustValue(reps, 1, setReps)}
+                onClick={() => adjustValue(reps, 1, setReps, "reps")}
                 className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-background text-muted-foreground transition-colors hover:bg-primary hover:text-primary-foreground active:scale-95"
               >
                 <Plus className="h-4 w-4" />
